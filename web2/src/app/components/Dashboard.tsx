@@ -1,4 +1,4 @@
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceLine, Tooltip, Legend } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceLine, ReferenceDot, Tooltip } from 'recharts';
 import clsx from 'clsx';
 import type { AppData } from '../lib/history';
 import type { TooltipProps } from 'recharts';
@@ -78,6 +78,20 @@ export function Dashboard({ theme, data }: DashboardProps) {
     ? Math.max(...evolutionData.flatMap((e) => e.history.map((h) => h.pct)))
     : 22;
   const evolutionDomainMax = Math.max(Math.ceil(evolutionMaxPct * 1.15), 5);
+
+  const lastConvergence = convergenceData[convergenceData.length - 1] as
+    | (Record<string, number> & { actas: number })
+    | undefined;
+  const convergenceYMax = Math.ceil(
+    Math.max(...top5.map((c) => c.percent), 20) * 1.15,
+  );
+  const currentActas = Math.ceil(pctActas);
+  const convergenceXTicks = (() => {
+    const mid = Math.round((52 + currentActas) / 2);
+    return currentActas - mid >= 5 && mid - 52 >= 5
+      ? [52, mid, currentActas]
+      : [52, currentActas];
+  })();
 
   const actualizadoAlStr = updatedAt.toLocaleString('es-PE', {
     timeZone: 'America/Lima',
@@ -180,56 +194,121 @@ export function Dashboard({ theme, data }: DashboardProps) {
         <p className="text-body themed-text-secondary max-w-3xl">
           Vista a partir del umbral donde la serie dejó de oscilar por muestras pequeñas. El eje horizontal es cuántas actas estaban contabilizadas en cada corte, no el tiempo.
         </p>
-        <div className="w-full h-[380px] md:h-[480px] themed-border border p-3 md:p-4">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={convergenceData} margin={{ top: 10, right: 24, left: -12, bottom: 10 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-soft)" />
-              <XAxis
-                dataKey="actas"
-                type="number"
-                domain={[52, Math.min(100, Math.ceil(data.pctActas) + 3)]}
-                ticks={(() => {
-                  const cur = Math.ceil(data.pctActas);
-                  const base = [52, 60, 70, 80, 90].filter((t) => t <= cur - 4);
-                  return [...base, cur];
-                })()}
-                axisLine={false}
-                tickLine={false}
-                tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
-                tickFormatter={(val) => `${val}%`}
-              />
-              <YAxis
-                domain={[5, 20]}
-                ticks={[5, 10, 15, 20]}
-                axisLine={false}
-                tickLine={false}
-                tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
-                tickFormatter={(val) => `${val}%`}
-              />
-              <Tooltip
-                content={<ConvergenceTooltip />}
-                cursor={{ stroke: 'var(--text-meta)', strokeDasharray: '3 3', strokeWidth: 1 }}
-              />
-              <ReferenceLine y={10} stroke="var(--text-meta)" strokeDasharray="3 3" label={{ value: '10%', position: 'insideLeft', fill: 'var(--text-meta)', fontFamily: 'var(--font-mono)', fontSize: 10 }} />
-              {top5.map((c, i) => (
-                <Line
-                  key={c.id}
-                  type="monotone"
-                  dataKey={c.party}
-                  stroke={SERIES_COLORS[i % 5]}
-                  strokeWidth={2}
-                  dot={{ r: 2.2, strokeWidth: 0 }}
-                  activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--bg-primary)' }}
-                  isAnimationActive={false}
-                  connectNulls
+
+        <div className="flex flex-col md:flex-row gap-4 md:gap-6 themed-border border p-3 md:p-4">
+          <div className="h-[360px] md:h-[480px] flex-1 min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={convergenceData} margin={{ top: 10, right: 12, left: -12, bottom: 10 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-soft)" />
+                <XAxis
+                  dataKey="actas"
+                  type="number"
+                  domain={[52, Math.min(100, currentActas + 1)]}
+                  ticks={convergenceXTicks}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+                  tickFormatter={(val) => `${val}%`}
                 />
-              ))}
-              <Legend
-                wrapperStyle={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', paddingTop: '1rem' }}
-                iconType="plainline"
-              />
-            </LineChart>
-          </ResponsiveContainer>
+                <YAxis
+                  domain={[0, convergenceYMax]}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+                  tickFormatter={(val) => `${val}%`}
+                  width={40}
+                />
+                <Tooltip
+                  content={<ConvergenceTooltip />}
+                  cursor={{ stroke: 'var(--text-meta)', strokeDasharray: '3 3', strokeWidth: 1 }}
+                />
+                <ReferenceLine
+                  y={10}
+                  stroke="var(--text-meta)"
+                  strokeDasharray="3 3"
+                  label={{ value: 'umbral 10%', position: 'insideTopLeft', fill: 'var(--text-meta)', fontFamily: 'var(--font-mono)', fontSize: 10 }}
+                />
+                {top5.map((c, i) => (
+                  <Line
+                    key={c.id}
+                    type="monotone"
+                    dataKey={c.party}
+                    stroke={SERIES_COLORS[i % 5]}
+                    strokeWidth={i === 0 ? 2.75 : 1.5}
+                    strokeOpacity={i === 0 ? 1 : 0.85}
+                    dot={false}
+                    activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--bg-primary)' }}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+                ))}
+                {lastConvergence &&
+                  top5.map((c, i) => {
+                    const y = lastConvergence[c.party];
+                    if (typeof y !== 'number') return null;
+                    return (
+                      <ReferenceDot
+                        key={`end-${c.id}`}
+                        x={lastConvergence.actas}
+                        y={y}
+                        r={i === 0 ? 4 : 3}
+                        fill={SERIES_COLORS[i % 5]}
+                        stroke="var(--bg-primary)"
+                        strokeWidth={1.5}
+                        ifOverflow="visible"
+                      />
+                    );
+                  })}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="flex flex-col md:w-56 md:shrink-0 md:justify-center gap-0 md:gap-1">
+            <div className="flex items-baseline justify-between pb-2 border-b themed-border">
+              <span className="text-xs-eyebrow themed-text-meta">AL CORTE ACTUAL</span>
+              <span className="text-xs-eyebrow themed-text-meta">% VOTOS</span>
+            </div>
+            {top5.map((c, i) => {
+              const color = SERIES_COLORS[i % 5];
+              const isLeader = i === 0;
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between gap-3 py-2 border-b themed-border last:border-b-0"
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span
+                      className="shrink-0 inline-block"
+                      style={{
+                        width: 14,
+                        height: isLeader ? 3 : 2,
+                        background: color,
+                        opacity: isLeader ? 1 : 0.85,
+                      }}
+                    />
+                    <span
+                      className={clsx(
+                        'font-mono text-xs truncate',
+                        isLeader ? 'themed-text-primary' : 'themed-text-secondary',
+                      )}
+                      title={c.party}
+                    >
+                      {c.party}
+                    </span>
+                  </div>
+                  <span
+                    className={clsx(
+                      'font-mono tabular-nums shrink-0',
+                      isLeader ? 'text-sm md:text-base' : 'text-xs md:text-sm',
+                    )}
+                    style={{ color }}
+                  >
+                    {c.percent.toFixed(2)}%
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </section>
 
