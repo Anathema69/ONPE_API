@@ -216,7 +216,7 @@ export function Dashboard({ theme, data }: DashboardProps) {
         </p>
 
         <div className="flex flex-col md:flex-row gap-4 md:gap-6 themed-border border p-3 md:p-4">
-          <div className="h-[360px] md:h-[480px] flex-1 min-w-0">
+          <div className="w-full h-[360px] md:h-[480px] md:flex-1 md:min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={convergenceData} margin={{ top: 10, right: 12, left: -12, bottom: 10 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-soft)" />
