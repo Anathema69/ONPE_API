@@ -64,8 +64,20 @@ export function Dashboard({ theme, data }: DashboardProps) {
 
   const {
     updatedAt, totalActas, pctActas, snapshotsCount, horasDeConteo,
-    top5, convergenceData, evolutionData, scenarios,
+    top5, convergenceData, evolutionData,
   } = data;
+
+  const leader = top5[0] ?? null;
+  const gapToMajority = leader ? +(50 - leader.percent).toFixed(2) : null;
+  const runoffPairs: Array<{ a: typeof top5[0]; b: typeof top5[0]; label: string }> = [];
+  if (top5[1] && top5[2]) runoffPairs.push({ a: top5[1], b: top5[2], label: '2° vs 3°' });
+  if (top5[2] && top5[3]) runoffPairs.push({ a: top5[2], b: top5[3], label: '3° vs 4°' });
+  if (top5[1] && top5[3]) runoffPairs.push({ a: top5[1], b: top5[3], label: '2° vs 4°' });
+
+  const evolutionMaxPct = evolutionData.length
+    ? Math.max(...evolutionData.flatMap((e) => e.history.map((h) => h.pct)))
+    : 22;
+  const evolutionDomainMax = Math.max(Math.ceil(evolutionMaxPct * 1.15), 5);
 
   const actualizadoAlStr = updatedAt.toLocaleString('es-PE', {
     timeZone: 'America/Lima',
@@ -168,9 +180,9 @@ export function Dashboard({ theme, data }: DashboardProps) {
         <p className="text-body themed-text-secondary max-w-3xl">
           Vista a partir del umbral donde la serie dejó de oscilar por muestras pequeñas. El eje horizontal es cuántas actas estaban contabilizadas en cada corte, no el tiempo.
         </p>
-        <div className="w-full h-[380px] md:h-[480px]">
+        <div className="w-full h-[380px] md:h-[480px] themed-border border p-3 md:p-4">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={convergenceData} margin={{ top: 10, right: 24, left: -6, bottom: 10 }}>
+            <LineChart data={convergenceData} margin={{ top: 10, right: 24, left: -12, bottom: 10 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-soft)" />
               <XAxis
                 dataKey="actas"
@@ -227,32 +239,32 @@ export function Dashboard({ theme, data }: DashboardProps) {
           <h2 className="text-h2 text-[var(--text-primary)]">Evolución del conteo</h2>
           <span className="text-xs-eyebrow themed-text-meta">Top 5 · a lo largo del tiempo</span>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           {evolutionData.map((c, i) => {
             const color = SERIES_COLORS[i % 5];
             return (
-              <div key={c.id} className="themed-border border p-3 md:p-4 flex flex-col gap-2 md:gap-3">
+              <div key={c.id} className="themed-border border p-4 flex flex-col gap-3">
                 <div className="flex flex-col min-w-0">
-                  <span className="text-[0.65rem] md:text-xs themed-text-meta uppercase tracking-widest font-mono truncate" title={c.party}>{c.party}</span>
-                  <span className="font-mono text-xs md:text-sm truncate" title={c.name}>{c.name.split(' ').slice(-2).join(' ')}</span>
+                  <span className="text-xs-eyebrow themed-text-meta truncate" title={c.party}>{c.party}</span>
+                  <span className="font-mono text-sm truncate" title={c.name}>{c.name.split(' ').slice(-2).join(' ')}</span>
                 </div>
-                <div className="h-[60px] md:h-[100px] w-full">
+                <div className="h-[120px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={c.history} margin={{ top: 4, right: 2, left: 2, bottom: 4 }}>
+                    <LineChart data={c.history} margin={{ top: 5, right: 2, left: 2, bottom: 5 }}>
                       <XAxis dataKey="date" hide />
-                      <YAxis domain={['dataMin - 0.5', 'dataMax + 0.5']} hide />
+                      <YAxis domain={[0, evolutionDomainMax]} hide />
                       <Tooltip
                         contentStyle={{ borderRadius: 0, border: '1px solid var(--border-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '4px' }}
                         labelStyle={{ color: 'var(--text-meta)' }}
                         formatter={(val: number) => [`${val.toFixed(2)}%`, 'Votos']}
                       />
-                      <Line type="monotone" dataKey="pct" stroke={color} strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} isAnimationActive={false} />
+                      <Line type="monotone" dataKey="pct" stroke={color} strokeWidth={1.75} dot={{ r: 2, fill: color }} activeDot={{ r: 3 }} isAnimationActive={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
                 <div className="flex justify-between items-baseline mt-auto">
-                  <span className="font-mono text-[0.65rem] md:text-xs themed-text-secondary">{c.history[0]?.date ?? ''} → {c.history.at(-1)?.date ?? ''}</span>
-                  <span className="font-mono text-sm md:text-lg tabular-nums" style={{ color }}>{c.percent.toFixed(2)}%</span>
+                  <span className="font-mono text-xs themed-text-secondary truncate">{c.history[0]?.date ?? ''} → {c.history.at(-1)?.date ?? ''}</span>
+                  <span className="font-mono text-lg tabular-nums shrink-0" style={{ color }}>{c.percent.toFixed(2)}%</span>
                 </div>
               </div>
             );
@@ -264,27 +276,66 @@ export function Dashboard({ theme, data }: DashboardProps) {
       <section className="w-full max-w-7xl mx-auto px-4 py-16 flex flex-col gap-6">
         <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-2 border-b themed-border pb-3">
           <h2 className="text-h2 text-[var(--text-primary)]">Segunda vuelta</h2>
-          <span className="text-xs-eyebrow themed-text-meta">Escenarios aritméticos</span>
+          <span className="text-xs-eyebrow themed-text-meta">¿Quién acompaña al líder?</span>
         </div>
         <p className="text-body themed-text-secondary max-w-3xl">
-          La Constitución obliga a un balotaje cuando ninguna candidatura supera el 50 % + 1 de votos válidos. Con el corte actual esa segunda vuelta es inevitable. Los pares posibles entre las tres primeras fuerzas:
+          La Constitución obliga a un balotaje cuando ninguna candidatura supera el 50 % + 1 de votos válidos. Con el corte actual el primer puesto está sellado en los márgenes; el suspenso es quién pasa segundo.
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {scenarios.map((s, i) => (
-            <div key={i} className="themed-border border p-6 flex flex-col gap-4">
-              <div className="flex flex-col gap-1">
-                <span className="text-xs-eyebrow themed-text-meta">ESCENARIO {String(i + 1).padStart(2, '0')}</span>
-                <span className="font-serif text-xl">{s.c1} vs. {s.c2}</span>
-              </div>
-              <div className="mt-4 flex flex-col">
-                <span className="font-mono text-2xl tabular-nums themed-text-primary">{Math.abs(s.diff).toFixed(2)} pp</span>
-                <span className="font-mono text-xs themed-text-secondary">Distancia actual</span>
-              </div>
+
+        {leader && (
+          <div className="themed-border border p-6 md:p-8 flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+            <div className="flex flex-col gap-2">
+              <span className="text-xs-eyebrow themed-text-meta">PRIMER PUESTO · CORTE ACTUAL</span>
+              <span className="font-serif text-2xl md:text-4xl text-[var(--text-primary)]">
+                {leader.name.split(' ').slice(-2).join(' ')}
+              </span>
+              <span className="text-xs-eyebrow themed-text-meta">{leader.party}</span>
             </div>
-          ))}
-        </div>
+            <div className="flex flex-col md:items-end gap-1">
+              <span className="font-mono text-4xl md:text-5xl tabular-nums" style={{ color: SERIES_COLORS[0] }}>
+                {leader.percent.toFixed(2)}%
+              </span>
+              <span className="font-mono text-xs themed-text-secondary md:text-right max-w-xs">
+                {gapToMajority !== null && gapToMajority > 0
+                  ? `${gapToMajority.toFixed(2)} pp por debajo del 50 % + 1 → balotaje inevitable`
+                  : 'supera el 50 % + 1 — no requiere balotaje'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {runoffPairs.length > 0 && (
+          <>
+            <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-2 pt-4">
+              <h3 className="text-h3 text-[var(--text-primary)]">Pelea por el segundo lugar</h3>
+              <span className="text-xs-eyebrow themed-text-meta">Márgenes entre candidatos del 2° al 4°</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {runoffPairs.map((p, i) => {
+                const diff = Math.abs(p.a.percent - p.b.percent);
+                return (
+                  <div key={i} className="themed-border border p-6 flex flex-col gap-4">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs-eyebrow themed-text-meta">{p.label}</span>
+                      <span className="font-serif text-lg md:text-xl text-[var(--text-primary)]">
+                        {p.a.name.split(' ').slice(-2).join(' ')}{' '}
+                        <span className="themed-text-meta">vs.</span>{' '}
+                        {p.b.name.split(' ').slice(-2).join(' ')}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-col">
+                      <span className="font-mono text-2xl tabular-nums themed-text-primary">{diff.toFixed(2)} pp</span>
+                      <span className="font-mono text-xs themed-text-secondary">Margen actual</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
         <p className="text-body themed-text-secondary italic max-w-3xl">
-          Estos pares son escenarios de cierre, no predicciones. El resultado de un balotaje depende del flujo de voto de las candidaturas eliminadas, información que requiere encuestas específicas.
+          Un balotaje no se resuelve sumando porcentajes: el flujo de voto de las candidaturas eliminadas requiere encuestas específicas. Lo que estos márgenes describen es qué tan reversible o sellado está el segundo puesto con el corte actual.
         </p>
       </section>
 
