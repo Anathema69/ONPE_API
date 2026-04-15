@@ -34,6 +34,10 @@ HEADERS = {
     "Accept-Language": "es-PE,es;q=0.9",
     "Referer": "https://resultadoelectoral.onpe.gob.pe/main/presidenciales",
     "Origin": "https://resultadoelectoral.onpe.gob.pe",
+    # CloudFront filtra si no parece fetch/XHR desde la SPA
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
 }
 TIMEOUT = 20
 TOP_N = 5
