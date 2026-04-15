@@ -1,0 +1,58 @@
+---
+import Base from "../layouts/Base.astro";
+import CurrentState from "../components/CurrentState.astro";
+import EvolutionStable from "../components/EvolutionStable.astro";
+import Evolution from "../components/Evolution.astro";
+import SecondRound from "../components/SecondRound.astro";
+import { loadSnapshots } from "../lib/history";
+
+const snaps = loadSnapshots();
+const first = snaps[0];
+const last = snaps[snaps.length - 1];
+const horas = (last.timestamp.getTime() - first.timestamp.getTime()) / 36e5;
+---
+
+<Base title="Elecciones 2026 — análisis del cómputo ONPE">
+  <header class="container" style="padding: 4rem 0 2rem;">
+    <div class="eyebrow">Elecciones Generales · Perú 2026 · Presidenciales</div>
+    <h1 style="margin-top: 1rem; max-width: 18ch;">
+      Un conteo <em style="font-style: italic; color: var(--accent);">en tiempo real</em> sin prisa por declarar ganador.
+    </h1>
+    <p class="prose" style="margin: 1.5rem 0 0 0; font-size: var(--fs-lg); color: var(--ink-muted); padding: 0;">
+      Seguimiento de los resultados preliminares publicados por la Oficina
+      Nacional de Procesos Electorales. {snaps.length} cortes registrados a
+      lo largo de <span class="mono">{horas.toFixed(1)}</span> horas de
+      escrutinio. Este sitio no proyecta ganadores: describe lo que la
+      matemática del conteo ya fija y lo que todavía está abierto.
+    </p>
+  </header>
+
+  <CurrentState />
+  <EvolutionStable />
+  <Evolution />
+  <SecondRound />
+
+  <section class="prose" style="margin-top: 5rem;">
+    <div class="eyebrow">Metodología</div>
+    <h3 style="margin-top: .5rem;">De dónde salen estos números</h3>
+    <p>
+      Cada 30 minutos un proceso automático consulta los endpoints públicos
+      del portal de resultados de la ONPE y guarda un corte en bruto. Los
+      cortes anteriores al inicio del rastreo fueron reconstruidos desde
+      capturas del portal y snapshots de Internet Archive. Todo dato en esta
+      página corresponde al último corte registrado en ese histórico.
+    </p>
+    <p>
+      Los primeros puntos de la serie (menos del 1 % de actas) provienen de
+      mesas con entrega rápida — típicamente urbanas y de Lima — y no son
+      representativos del electorado nacional. Los porcentajes oscilan
+      fuertemente hasta superar el 10 % de actas contabilizadas.
+    </p>
+    <p>
+      Los datos son <strong>preliminares</strong>. El resultado oficial lo
+      proclama el Jurado Nacional de Elecciones tras resolver las
+      impugnaciones de actas. Nada de lo publicado aquí sustituye esa
+      proclamación.
+    </p>
+  </section>
+</Base>

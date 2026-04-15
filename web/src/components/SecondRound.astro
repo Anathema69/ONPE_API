@@ -1,0 +1,82 @@
+---
+/**
+ * Bloque de 2da vuelta: la ley peruana fuerza balotaje si el primero
+ * no supera 50% + 1. Aqui calculamos:
+ *   - si la matematica obliga a 2da vuelta (dado lo que se ha contado)
+ *   - distancia entre posiciones
+ *   - pares posibles entre los top 3 para el balotaje
+ *
+ * NO proyectamos ganador. El flujo de voto requiere encuestas de
+ * transferencia (pendiente).
+ */
+import { latest } from "../lib/history";
+
+const snap = latest();
+const top3 = snap.top.slice(0, 3);
+const primero = top3[0];
+const forzada = primero?.pctVotos != null && primero.pctVotos < 50;
+const pares = top3.length >= 2
+  ? [[top3[0], top3[1]], [top3[0], top3[2]], [top3[1], top3[2]]]
+  : [];
+---
+
+<section class="container" style="margin-top: 4rem;">
+  <div style="display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid var(--rule); padding-bottom: .75rem; margin-bottom: 1.25rem;">
+    <h2 style="font-size: var(--fs-xl);">Segunda vuelta</h2>
+    <span class="eyebrow">Escenarios aritméticos</span>
+  </div>
+
+  <div class="prose" style="margin: 0 0 1.5rem 0;">
+    <p>
+      La Constitución peruana obliga a un balotaje cuando ninguna candidatura
+      supera el <span class="mono">50 % + 1</span> de votos válidos. Con el
+      corte actual de <span class="mono">{snap.pctActas.toFixed(3)} %</span>
+      de actas contabilizadas,
+      {forzada ? (
+        <strong> la segunda vuelta es aritméticamente inevitable:</strong>
+      ) : (
+        <span> la matemática aún no fuerza un balotaje.</span>
+      )}
+      {forzada && primero?.pctVotos != null && (
+        <span>
+          {" "}la candidatura en primer lugar registra {primero.pctVotos.toFixed(3)} %,
+          muy por debajo del umbral.
+        </span>
+      )}
+    </p>
+  </div>
+
+  <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">
+    {pares.map(([a, b]) => {
+      const diff = (a.pctVotos ?? 0) - (b.pctVotos ?? 0);
+      return (
+        <article style="border: 1px solid var(--rule); padding: 1.25rem;">
+          <div class="eyebrow" style="margin-bottom:.75rem;">Hipótesis</div>
+          <div class="mono" style="display:flex; flex-direction:column; gap:.3rem;">
+            <div style="display:flex; justify-content:space-between;">
+              <span>{a.candidato.split(" ").slice(-2).join(" ")}</span>
+              <span>{a.pctVotos?.toFixed(2)}%</span>
+            </div>
+            <div style="color: var(--ink-softer); font-size: var(--fs-xs); letter-spacing:.08em;">vs.</div>
+            <div style="display:flex; justify-content:space-between;">
+              <span>{b.candidato.split(" ").slice(-2).join(" ")}</span>
+              <span>{b.pctVotos?.toFixed(2)}%</span>
+            </div>
+          </div>
+          <div class="eyebrow" style="margin-top:1rem;">
+            Distancia actual: <span class="mono">{Math.abs(diff).toFixed(2)} pp</span>
+          </div>
+        </article>
+      );
+    })}
+  </div>
+
+  <p class="note" style="margin-top: 1.5rem;">
+    Estos pares son <em>escenarios de cierre</em>, no predicciones del
+    ganador del balotaje. El resultado de una segunda vuelta depende del
+    flujo de voto de las candidaturas eliminadas — información que no se
+    deduce del primer escrutinio y que requiere encuestas de transferencia
+    específicas. Hasta que esas encuestas estén disponibles, cualquier
+    proyección es especulación.
+  </p>
+</section>

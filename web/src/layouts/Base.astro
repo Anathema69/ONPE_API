@@ -1,0 +1,37 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description = "Analisis de los resultados de las Elecciones Generales 2026." } = Astro.props;
+---
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <title>{title}</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500;6..72,600&family=JetBrains+Mono:wght@300;400;500;700&display=swap"
+    />
+    <link rel="stylesheet" href="/src/styles/tokens.css" />
+  </head>
+  <body>
+    <slot />
+
+    <footer class="container" style="margin-top: 6rem; padding: 2.5rem 0; border-top: 1px solid var(--rule);">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:1rem;">
+        <span class="eyebrow">Fuente: Oficina Nacional de Procesos Electorales (ONPE) — datos preliminares</span>
+        <span class="eyebrow">hecho por Anathema</span>
+      </div>
+    </footer>
+  </body>
+</html>
+<style is:global>
+  @import "../styles/tokens.css";
+</style>

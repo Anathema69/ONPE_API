@@ -1,0 +1,145 @@
+/*
+  Sistema visual: editorial (paper) + terminal blocks (ink).
+  Sin gradientes, sin sombras, sin border-radius cosmetico.
+  Reglas finas, tabular nums, numeros monoespaciados.
+*/
+
+:root {
+  /* paleta editorial (paper) */
+  --paper:       #FAF8F3;
+  --ink:         #111111;
+  --ink-muted:   #4A4A4A;
+  --ink-softer:  #767676;
+  --rule:        #D8D2C4;
+  --rule-soft:   #ECE6D6;
+
+  /* paleta terminal (ink) */
+  --terminal-bg:     #111111;
+  --terminal-fg:     #E8E3D6;
+  --terminal-muted:  #8A8578;
+  --terminal-rule:   #2A2A2A;
+
+  /* acento unico */
+  --accent:      #8B2E2E;
+  --accent-soft: #D4A59A;
+
+  /* escala tipografica responsiva (clamp: min / fluid / max) */
+  --fs-xs:   0.75rem;
+  --fs-sm:   0.875rem;
+  --fs-md:   1rem;
+  --fs-lg:   clamp(1.1rem,  1rem + 0.5vw, 1.25rem);
+  --fs-xl:   clamp(1.35rem, 1.1rem + 1.2vw, 1.75rem);
+  --fs-2xl:  clamp(1.75rem, 1.2rem + 2.5vw, 2.5rem);
+  --fs-3xl:  clamp(2.25rem, 1.5rem + 3.5vw, 3.5rem);
+  --fs-hero: clamp(2.5rem,  1.5rem + 6.5vw, 5rem);
+
+  /* layout */
+  --measure: 68ch;      /* max ancho de columna de lectura */
+  --wide:    1200px;    /* max ancho de bloques visuales */
+  --gap:     clamp(1rem, 2.5vw, 1.75rem);
+
+  /* transiciones - minimas */
+  --t: 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* reset pragmatico */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Newsreader", "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  font-size: var(--fs-md);
+  font-weight: 380;
+  line-height: 1.55;
+  font-feature-settings: "kern", "liga", "ss02";
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: var(--accent); color: var(--paper); }
+
+a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: var(--accent); }
+
+/* numeros siempre tabulares y mono */
+.num, code, kbd, pre, .mono {
+  font-family: "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "ss01", "zero";
+}
+
+/* reglas finas - como columnas de periodico */
+hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: 2rem 0;
+}
+hr.thick { border-top-width: 2px; border-top-color: var(--ink); }
+
+/* utilidades */
+.container     { width: min(var(--wide), 100% - 2rem); margin-inline: auto; }
+.prose         { width: min(var(--measure), 100% - 2rem); margin-inline: auto; }
+.eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-softer);
+}
+.rule-top    { border-top: 1px solid var(--rule); }
+.rule-bottom { border-bottom: 1px solid var(--rule); }
+
+/* bloque "terminal" - inversion para secciones de datos */
+.terminal {
+  background: var(--terminal-bg);
+  color: var(--terminal-fg);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+  border: 1px solid var(--terminal-rule);
+}
+.terminal .eyebrow { color: var(--terminal-muted); }
+.terminal hr { border-top-color: var(--terminal-rule); }
+
+/* headings editoriales */
+h1, h2, h3, h4 {
+  font-family: "Newsreader", "Source Serif 4", Georgia, serif;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.08;
+  margin: 0;
+  font-optical-sizing: auto;
+  font-variation-settings: "opsz" 24;
+}
+h1 { font-size: var(--fs-hero); font-weight: 400; letter-spacing: -0.03em; font-variation-settings: "opsz" 72; }
+h2 { font-size: var(--fs-2xl); }
+h3 { font-size: var(--fs-xl);  }
+h4 { font-size: var(--fs-lg);  }
+
+/* disclaimers */
+.note {
+  font-size: var(--fs-sm);
+  color: var(--ink-muted);
+  font-style: italic;
+  border-left: 2px solid var(--rule);
+  padding-left: 0.9rem;
+}
+
+/* responsive chart containers: el SVG interno se estira al 100% */
+.chart-wrap    { width: 100%; }
+.chart-wrap svg { width: 100%; height: auto; display: block; max-width: 100%; }
+
+/* alternancia desktop/mobile de gráficas con layouts distintos */
+.chart-desktop { display: block; }
+.chart-mobile  { display: none; }
+@media (max-width: 720px) {
+  .chart-desktop { display: none; }
+  .chart-mobile  { display: block; }
+}
+
+/* contenedor principal con paddings laterales saludables en móvil */
+@media (max-width: 720px) {
+  .container { width: calc(100% - 1.5rem); }
+  .prose     { width: calc(100% - 1.5rem); padding: 0; }
+}

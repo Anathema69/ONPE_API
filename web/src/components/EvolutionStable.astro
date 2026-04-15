@@ -1,0 +1,208 @@
+---
+/**
+ * Multilinea del top 5 a partir del 52% de actas contabilizadas, es decir
+ * desde que la serie dejo de oscilar por muestras pequeñas. La intencion es
+ * ver la convergencia real, no el ruido de las primeras mil actas.
+ *
+ * Eje X: porcentaje de actas contabilizadas (no tiempo). Cada linea tiene
+ * su propio color de la paleta editorial. Las etiquetas de candidato van
+ * al final de cada linea, no en leyenda separada, para evitar ida-vuelta
+ * visual.
+ *
+ * Render SSR con jsdom. SVG estatico en el HTML.
+ */
+import { longSeries, stableTop5Names } from "../lib/history";
+import { shortName, palette5 } from "../lib/names";
+import { responsive } from "../lib/svg";
+import * as Plot from "@observablehq/plot";
+import { JSDOM } from "jsdom";
+
+const UMBRAL = 52;
+
+const top5 = stableTop5Names();
+const data = longSeries()
+  .filter(
+    (d) =>
+      top5.includes(d.candidato) &&
+      d.pctVotos != null &&
+      d.pctActas >= UMBRAL,
+  )
+  .map((d) => ({
+    ...d,
+    pctVotos: d.pctVotos as number,
+    displayName: shortName(d.candidato),
+  }));
+
+const ordenCorto = top5.map(shortName);
+const colorEntries = ordenCorto.map((n, i) => [n, palette5[i]] as const);
+const colorMap = Object.fromEntries(colorEntries) as Record<string, string>;
+
+// etiquetas al final de cada linea
+const endLabels = ordenCorto
+  .map((name) => {
+    const pts = data
+      .filter((d) => d.displayName === name)
+      .sort((a, b) => a.pctActas - b.pctActas);
+    return pts.length ? pts[pts.length - 1] : null;
+  })
+  .filter((x): x is (typeof data)[number] => x !== null);
+
+const sharedAxes = {
+  x: {
+    label: "% de actas contabilizadas →",
+    labelAnchor: "center" as const,
+    labelOffset: 36,
+    domain: [UMBRAL, 100],
+    grid: false,
+    tickFormat: (d: number) => d + "%",
+  },
+  y: {
+    label: "% votos válidos",
+    labelAnchor: "top" as const,
+    labelOffset: 48,
+    domain: [7, 18],
+    grid: true,
+  },
+  color: { domain: ordenCorto, range: palette5, legend: false },
+};
+const lineMarks = [
+  Plot.gridY({ stroke: "#D8D2C4", strokeOpacity: 0.7 }),
+  Plot.axisY({ tickFormat: (d: number) => d + "%", tickSize: 0 }),
+  Plot.ruleY([10], {
+    stroke: "#767676",
+    strokeDasharray: "2,3",
+    strokeWidth: 0.8,
+  }),
+  Plot.line(data, {
+    x: "pctActas",
+    y: "pctVotos",
+    stroke: "displayName",
+    strokeWidth: 2,
+    curve: "monotone-x",
+  }),
+  Plot.dot(data, {
+    x: "pctActas",
+    y: "pctVotos",
+    fill: "displayName",
+    r: 2.4,
+  }),
+];
+
+// desktop: etiquetas al final de la línea
+const domDesktop = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+const desktopChart = Plot.plot({
+  document: domDesktop.window.document,
+  width: 1100,
+  height: 460,
+  marginLeft: 56,
+  marginRight: 150,
+  marginBottom: 44,
+  marginTop: 20,
+  style: {
+    background: "transparent",
+    color: "#111111",
+    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+    fontSize: "12px",
+  },
+  ...sharedAxes,
+  marks: [
+    ...lineMarks,
+    Plot.text(endLabels, {
+      x: "pctActas",
+      y: "pctVotos",
+      text: (d: any) => `${d.displayName}  ${d.pctVotos.toFixed(2)}%`,
+      fill: "displayName",
+      textAnchor: "start",
+      dx: 10,
+      dy: 0,
+      fontWeight: 500,
+    }),
+  ],
+});
+const desktopHTML = responsive(desktopChart.outerHTML);
+domDesktop.window.close();
+
+// mobile: sin etiquetas flotantes (no hay espacio). La leyenda inferior
+// cubre la identificación. Aspecto mas cuadrado aprovecha mejor el ancho.
+const domMobile = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+const mobileChart = Plot.plot({
+  document: domMobile.window.document,
+  width: 460,
+  height: 520,
+  marginLeft: 48,
+  marginRight: 16,
+  marginBottom: 48,
+  marginTop: 14,
+  style: {
+    background: "transparent",
+    color: "#111111",
+    fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+    fontSize: "13px",
+  },
+  ...sharedAxes,
+  marks: lineMarks,
+});
+const mobileHTML = responsive(mobileChart.outerHTML);
+domMobile.window.close();
+---
+
+<section class="container" style="margin-top: 4rem;">
+  <div style="display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid var(--rule); padding-bottom: .75rem; margin-bottom: 1.25rem;">
+    <h2 style="font-size: var(--fs-xl);">Convergencia desde el 52 %</h2>
+    <span class="eyebrow">Top 5 · % votos válidos vs. % actas contabilizadas</span>
+  </div>
+
+  <div class="prose" style="margin: 0 0 1.5rem 0;">
+    <p>
+      Esta vista descarta los primeros puntos del conteo — aquellos donde
+      menos de la mitad de las actas estaban procesadas y los porcentajes
+      aún oscilaban fuerte — y se concentra en la etapa donde los números
+      empezaron a asentarse. El eje horizontal ya no es el tiempo sino
+      <em>cuántas actas se habían contabilizado</em> cuando se tomó cada
+      corte, que es lo que realmente determina la estabilidad del número.
+    </p>
+  </div>
+
+  <figure style="margin: 0;">
+    <div class="chart-wrap chart-desktop" set:html={desktopHTML} />
+    <div class="chart-wrap chart-mobile"  set:html={mobileHTML}  />
+    <figcaption class="eyebrow" style="margin-top: 1rem;">
+      Línea discontinua: umbral referencial del 10 %. Colores elegidos para distinguibilidad visual, no para asociación partidista.
+    </figcaption>
+  </figure>
+
+  <div class="legend">
+    {colorEntries.map(([name, color]) => (
+      <div class="legend-item">
+        <span class="legend-dot" style={`background: ${color};`}></span>
+        <span class="mono legend-name">{name}</span>
+      </div>
+    ))}
+  </div>
+
+<style>
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: .5rem 1rem;
+    margin-top: 1.25rem;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .55rem 0;
+    border-top: 1px solid var(--rule);
+  }
+  .legend-dot {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+  .legend-name { font-size: var(--fs-sm); }
+  @media (max-width: 520px) {
+    .legend { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</section>

@@ -1,0 +1,176 @@
+---
+/**
+ * Bloque "terminal" con el estado actual del computo.
+ * En movil: el header de la tabla desaparece y cada candidato se muestra
+ * en formato apilado (nombre + partido arriba, votos y pct abajo).
+ * En desktop: grid de 4 columnas clasico.
+ */
+import { latest } from "../lib/history";
+import { shortName } from "../lib/names";
+
+const snap = latest();
+const ts = snap.timestamp;
+const fechaStr = ts.toLocaleString("es-PE", {
+  timeZone: "America/Lima",
+  day: "2-digit", month: "long", year: "numeric",
+  hour: "2-digit", minute: "2-digit",
+});
+const actasFormateadas = snap.totalActas?.toLocaleString("es-PE") ?? "—";
+const top = snap.top.slice(0, 5);
+---
+
+<section class="container" style="margin-top: 1rem;">
+  <div class="terminal">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:.75rem; margin-bottom: 1.5rem;">
+      <span class="eyebrow">Cómputo presidencial · corte actual</span>
+      <span class="eyebrow">ACTUALIZADO AL {fechaStr.toUpperCase()}</span>
+    </div>
+
+    <div class="kpi-grid">
+      <div>
+        <div class="kpi-num">{snap.pctActas.toFixed(3)}<span class="kpi-unit">%</span></div>
+        <div class="eyebrow" style="margin-top: .4rem;">actas contabilizadas</div>
+      </div>
+      <div>
+        <div class="kpi-num">{actasFormateadas}</div>
+        <div class="eyebrow" style="margin-top: .4rem;">total de actas</div>
+      </div>
+      <div>
+        <div class="kpi-num">{top.length}</div>
+        <div class="eyebrow" style="margin-top: .4rem;">en el tope</div>
+      </div>
+    </div>
+
+    <hr style="margin: 1.5rem 0;" />
+
+    <div class="rank-head">
+      <span class="eyebrow">#</span>
+      <span class="eyebrow">candidato / agrupación</span>
+      <span class="eyebrow rank-nums">votos</span>
+      <span class="eyebrow rank-nums">% válidos</span>
+    </div>
+
+    {top.map((c, i) => (
+      <div class={`rank-row ${i === top.length - 1 ? "last" : ""}`}>
+        <span class="rank-pos">{String(c.posicion).padStart(2, "0")}</span>
+        <span class="rank-name">
+          <span class="rank-full">{c.candidato}</span>
+          <span class="rank-short">{shortName(c.candidato)}</span>
+          <span class="rank-party">{c.agrupacion}</span>
+        </span>
+        <span class="rank-votes">{c.votosValidos?.toLocaleString("es-PE") ?? "—"}</span>
+        <span class="rank-pct">{c.pctVotos?.toFixed(3) ?? "—"}%</span>
+      </div>
+    ))}
+  </div>
+</section>
+
+<style>
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 1rem;
+  }
+  .kpi-num {
+    font-size: clamp(1.8rem, 1rem + 4vw, 3rem);
+    font-weight: 300;
+    line-height: 1;
+  }
+  .kpi-unit {
+    font-size: 0.5em;
+    color: var(--terminal-muted);
+    margin-left: .15rem;
+  }
+
+  /* tabla de ranking — desktop */
+  .rank-head,
+  .rank-row {
+    display: grid;
+    grid-template-columns: 2.5rem 1fr auto 5.5rem;
+    gap: 1rem 1.5rem;
+    align-items: baseline;
+  }
+  .rank-head {
+    padding-bottom: .75rem;
+    border-bottom: 1px solid var(--terminal-rule);
+  }
+  .rank-row {
+    padding: .9rem 0;
+    border-bottom: 1px solid var(--terminal-rule);
+  }
+  .rank-row.last { border-bottom: 0; }
+  .rank-nums { text-align: right; }
+
+  .rank-pos {
+    font-size: 1.75rem;
+    font-weight: 300;
+    color: var(--terminal-muted);
+  }
+  .rank-name { display: block; }
+  .rank-full  { font-size: 1.05rem; display: block; }
+  .rank-short { display: none; }
+  .rank-party {
+    font-size: var(--fs-xs);
+    color: var(--terminal-muted);
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    margin-top: .2rem;
+    display: block;
+  }
+  .rank-votes { text-align: right; font-size: 1.05rem; white-space: nowrap; }
+  .rank-pct   { text-align: right; font-size: 1.4rem; color: var(--accent-soft); white-space: nowrap; }
+
+  /* móvil: apilar votos + pct debajo del nombre */
+  @media (max-width: 640px) {
+    .kpi-grid  { grid-template-columns: 1fr 1fr; gap: 1.25rem 1rem; }
+    .kpi-grid > div:nth-child(3) { grid-column: 1 / -1; }
+
+    .rank-head { display: none; }
+    .rank-row {
+      grid-template-columns: 2rem 1fr;
+      grid-template-areas:
+        "pos name"
+        ".   meta";
+      gap: .3rem .9rem;
+      padding: 1rem 0;
+    }
+    .rank-pos   { grid-area: pos; font-size: 1.4rem; }
+    .rank-name  { grid-area: name; }
+    .rank-full  { display: none; }
+    .rank-short {
+      display: block;
+      font-size: 1.1rem;
+      font-weight: 500;
+    }
+    .rank-party { font-size: 0.7rem; }
+    .rank-votes,
+    .rank-pct {
+      grid-area: meta;
+      display: inline-block;
+      text-align: left;
+      font-size: 0.95rem;
+    }
+    .rank-pct {
+      color: var(--accent-soft);
+      font-size: 1.15rem;
+      font-weight: 500;
+      margin-right: .75rem;
+    }
+    .rank-row {
+      display: grid;
+      grid-template-columns: 2rem 1fr auto;
+      grid-template-areas: "pos name pct";
+    }
+    .rank-votes {
+      grid-column: 2 / -1;
+      grid-row: 2;
+      color: var(--terminal-muted);
+      font-size: 0.85rem;
+    }
+    .rank-pct {
+      grid-area: pct;
+      align-self: center;
+    }
+  }
+</style>

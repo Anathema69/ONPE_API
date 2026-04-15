@@ -1,0 +1,145 @@
+---
+/**
+ * Small multiples del top 5.
+ * Se renderizan DOS svg server-side:
+ *   - desktop: 5 paneles horizontales (fx)
+ *   - mobile:  5 filas verticales (fy), cada una full width
+ * CSS @media alterna cual se muestra. Cero JS en cliente.
+ */
+import { longSeries, stableTop5Names } from "../lib/history";
+import { shortName } from "../lib/names";
+import { responsive } from "../lib/svg";
+import * as Plot from "@observablehq/plot";
+import { JSDOM } from "jsdom";
+
+const top5 = stableTop5Names();
+const data = longSeries()
+  .filter((d) => top5.includes(d.candidato) && d.pctVotos != null)
+  .map((d) => ({
+    ...d,
+    pctVotos: d.pctVotos as number,
+    displayName: shortName(d.candidato),
+  }));
+
+const ordenCorto = top5.map(shortName);
+
+const sharedStyle = {
+  background: "transparent",
+  color: "#111111",
+  fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+  fontSize: "11px",
+};
+const sharedX = {
+  label: null,
+  tickFormat: (d: Date) =>
+    d.toLocaleDateString("es-PE", { day: "numeric", month: "short" }),
+  ticks: 3,
+};
+const sharedY = {
+  label: "% votos válidos",
+  labelAnchor: "top" as const,
+  labelOffset: 44,
+  grid: true,
+  domain: [0, 22],
+};
+const sharedMarks = [
+  Plot.frame({ stroke: "#D8D2C4" }),
+  Plot.axisY({ tickFormat: (d: number) => d + "%", tickSize: 0 }),
+  Plot.ruleY([0], { stroke: "#111111", strokeWidth: 0.5 }),
+  Plot.line(data, {
+    x: "timestamp",
+    y: "pctVotos",
+    stroke: "#8B2E2E",
+    strokeWidth: 1.5,
+    curve: "monotone-x",
+  }),
+  Plot.dot(data, {
+    x: "timestamp",
+    y: "pctVotos",
+    fill: "#8B2E2E",
+    r: 2,
+  }),
+];
+
+// --- desktop: 5 columnas ---
+const domDesktop = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+const desktopChart = Plot.plot({
+  document: domDesktop.window.document,
+  width: 1100,
+  height: 320,
+  marginLeft: 52,
+  marginBottom: 40,
+  marginTop: 32,
+  marginRight: 12,
+  style: sharedStyle,
+  x: sharedX,
+  y: sharedY,
+  fx: { domain: ordenCorto, label: null, axis: "top" },
+  facet: { data, x: "displayName" },
+  marks: sharedMarks,
+});
+const desktopHTML = responsive(desktopChart.outerHTML);
+domDesktop.window.close();
+
+// --- mobile: 5 filas ---
+const domMobile = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+const mobileChart = Plot.plot({
+  document: domMobile.window.document,
+  width: 420,
+  height: 1000,
+  marginLeft: 50,
+  marginBottom: 40,
+  marginTop: 10,
+  marginRight: 20,
+  style: { ...sharedStyle, fontSize: "13px" },
+  x: sharedX,
+  y: sharedY,
+  fy: { domain: ordenCorto, label: null, axis: "left" },
+  facet: { data, y: "displayName" },
+  marks: sharedMarks,
+});
+const mobileHTML = responsive(mobileChart.outerHTML);
+domMobile.window.close();
+
+// gap actual 1-2
+const ultimosPorCandidato = top5.map((c) =>
+  data
+    .filter((d) => d.candidato === c)
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0] ?? null,
+);
+const gap12 =
+  ultimosPorCandidato[0] && ultimosPorCandidato[1]
+    ? ultimosPorCandidato[0].pctVotos - ultimosPorCandidato[1].pctVotos
+    : null;
+---
+
+<section class="container" style="margin-top: 4rem;">
+  <div style="display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid var(--rule); padding-bottom: .75rem; margin-bottom: 1.25rem; flex-wrap: wrap; gap: .5rem;">
+    <h2 style="font-size: var(--fs-xl);">Evolución del conteo</h2>
+    <span class="eyebrow">Top 5 · a lo largo del tiempo</span>
+  </div>
+
+  <div class="prose" style="margin: 0 0 1.5rem 0; padding: 0;">
+    <p>
+      Cada serie muestra cómo se movió el porcentaje de cada candidatura
+      conforme fueron entrando las actas. Los saltos tempranos reflejan
+      muestras muy pequeñas: las primeras mesas urbanas no son
+      representativas del electorado completo.
+      {gap12 !== null && (
+        <span>
+          La distancia entre el primer y el segundo lugar, al último corte
+          registrado, es de <strong class="mono">{gap12.toFixed(2)} puntos
+          porcentuales</strong>.
+        </span>
+      )}
+    </p>
+  </div>
+
+  <figure style="margin: 0;">
+    <div class="chart-wrap chart-desktop" set:html={desktopHTML} />
+    <div class="chart-wrap chart-mobile"  set:html={mobileHTML}  />
+    <figcaption class="eyebrow" style="margin-top: 1rem;">
+      Línea oxblood: porcentaje sobre votos válidos. Eje: fecha del corte (hora Lima).
+    </figcaption>
+  </figure>
+</section>

@@ -6,3 +6,18 @@ data/
 .env
 .vscode/
 .idea/
+
+# web — Astro
+web/node_modules/
+web/dist/
+web/.astro/
+web/dev.log
+
+# web2 — Vite/React
+web2/node_modules/
+web2/dist/
+web2/dev.log
+web2/public/data/
+
+# ficheros sueltos
+*.zip

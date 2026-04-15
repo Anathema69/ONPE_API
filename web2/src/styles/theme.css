@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #FAF8F3;
+  --color-ink: #111111;
+  --color-ink-muted: #4A4A4A;
+  --color-ink-softer: #767676;
+  --color-rule: #D8D2C4;
+  --color-rule-soft: #ECE6D6;
+  --color-accent: #8B2E2E;
+  --color-accent-soft: #D4A59A;
+
+  --color-terminal-bg: #111111;
+  --color-terminal-fg: #E8E3D6;
+  --color-terminal-muted: #8A8578;
+  --color-terminal-rule: #2A2A2A;
+
+  --color-series-1: #8B2E2E;
+  --color-series-2: #3E5C76;
+  --color-series-3: #6B7F59;
+  --color-series-4: #B5884C;
+  --color-series-5: #3F3A34;
+
+  --font-serif: "Newsreader", serif;
+  --font-mono: "JetBrains Mono", monospace;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+  }
+}
+
+@utility text-hero {
+  font-family: var(--font-serif);
+  font-size: clamp(2.5rem, 1.5rem + 6.5vw, 5rem);
+  line-height: 1.08;
+  letter-spacing: -0.03em;
+  font-weight: 500;
+}
+
+@utility text-h2 {
+  font-family: var(--font-serif);
+  font-size: clamp(1.75rem, 1.2rem + 2.5vw, 2.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+}
+
+@utility text-h3 {
+  font-family: var(--font-serif);
+  font-size: clamp(1.35rem, 1.1rem + 1.2vw, 1.75rem);
+  line-height: 1.2;
+  font-weight: 400;
+}
+
+@utility text-body {
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+@utility text-xs-eyebrow {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+@utility tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Base definitions for contextual utility mapping */
+.theme-light {
+  --bg-primary: var(--color-paper);
+  --text-primary: var(--color-ink);
+  --text-secondary: var(--color-ink-muted);
+  --text-meta: var(--color-ink-softer);
+  --border-primary: var(--color-rule);
+  --border-soft: var(--color-rule-soft);
+  --font-dynamic-body: var(--font-serif);
+}
+
+.theme-dark {
+  --bg-primary: var(--color-terminal-bg);
+  --text-primary: var(--color-terminal-fg);
+  --text-secondary: var(--color-terminal-muted);
+  --text-meta: var(--color-terminal-muted);
+  --border-primary: var(--color-terminal-rule);
+  --border-soft: var(--color-terminal-rule);
+  --font-dynamic-body: var(--font-mono);
+}
+
+.themed-container {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-dynamic-body);
+}
+
+.themed-text-primary { color: var(--text-primary); }
+.themed-text-secondary { color: var(--text-secondary); }
+.themed-text-meta { color: var(--text-meta); }
+.themed-border { border-color: var(--border-primary); }
+.themed-border-soft { border-color: var(--border-soft); }
