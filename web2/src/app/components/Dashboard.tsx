@@ -1,6 +1,7 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceDot, Tooltip } from 'recharts';
 import clsx from 'clsx';
 import type { AppData } from '../lib/history';
+import { shortName } from '../lib/history';
 import type { TooltipProps } from 'recharts';
 
 const SERIES_COLORS = ['#8B2E2E', '#3E5C76', '#6B7F59', '#B5884C', '#3F3A34'];
@@ -166,9 +167,15 @@ export function Dashboard({ theme, data }: DashboardProps) {
             <div className="flex flex-col">
               {top5.map((c, i) => {
                 const history = evolutionData[i]?.history ?? [];
+                // Δ = cambio desde el primer corte con actas ≥ 52% (base de convergencia)
+                // hasta el corte actual — más informativo que corte-a-corte inmediato
+                const firstConv = convergenceData[0];
+                const lastConv = convergenceData[convergenceData.length - 1];
+                const fromPct = firstConv?.[c.party];
+                const toPct = lastConv?.[c.party];
                 const delta =
-                  history.length >= 2
-                    ? history[history.length - 1].pct - history[history.length - 2].pct
+                  typeof fromPct === 'number' && typeof toPct === 'number'
+                    ? toPct - fromPct
                     : null;
                 const color = SERIES_COLORS[i % 5];
                 return (
@@ -198,7 +205,7 @@ export function Dashboard({ theme, data }: DashboardProps) {
               })}
             </div>
             <p className="font-mono text-[0.7rem] text-[var(--color-terminal-muted)] uppercase tracking-widest mt-3">
-              Línea: evolución del candidato · Δ: cambio vs. corte anterior (puntos porcentuales)
+              Línea: evolución del candidato · Δ: cambio desde el 52% de actas contabilizadas (puntos porcentuales)
             </p>
           </div>
 
@@ -339,7 +346,7 @@ export function Dashboard({ theme, data }: DashboardProps) {
               <div key={c.id} className="themed-border border p-4 flex flex-col gap-3">
                 <div className="flex flex-col min-w-0">
                   <span className="text-xs-eyebrow themed-text-meta truncate" title={c.party}>{c.party}</span>
-                  <span className="font-mono text-sm truncate" title={c.name}>{c.name.split(' ').slice(-2).join(' ')}</span>
+                  <span className="font-mono text-sm truncate" title={c.name}>{shortName(c.name)}</span>
                 </div>
                 <div className="h-[120px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
@@ -442,7 +449,7 @@ export function Dashboard({ theme, data }: DashboardProps) {
             <div className="flex flex-col gap-2">
               <span className="text-xs-eyebrow themed-text-meta">PRIMER PUESTO · CORTE ACTUAL</span>
               <span className="font-serif text-2xl md:text-4xl text-[var(--text-primary)]">
-                {leader.name.split(' ').slice(-2).join(' ')}
+                {shortName(leader.name)}
               </span>
               <span className="text-xs-eyebrow themed-text-meta">{leader.party}</span>
             </div>
@@ -473,9 +480,9 @@ export function Dashboard({ theme, data }: DashboardProps) {
                     <div className="flex flex-col gap-1">
                       <span className="text-xs-eyebrow themed-text-meta">{p.label}</span>
                       <span className="font-serif text-lg md:text-xl text-[var(--text-primary)]">
-                        {p.a.name.split(' ').slice(-2).join(' ')}{' '}
+                        {shortName(p.a.name)}{' '}
                         <span className="themed-text-meta">vs.</span>{' '}
-                        {p.b.name.split(' ').slice(-2).join(' ')}
+                        {shortName(p.b.name)}
                       </span>
                     </div>
                     <div className="mt-2 flex flex-col">

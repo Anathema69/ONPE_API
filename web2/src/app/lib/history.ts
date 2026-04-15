@@ -55,17 +55,20 @@ type Row = {
   pctVotosValidos: number | null;
 };
 
-function shortName(full: string): string {
+export function shortName(full: string): string {
   const n = full.toUpperCase();
-  if (n.includes("FUJIMORI")) return "Fujimori";
-  if (n.includes("LÓPEZ ALIAGA") || n.includes("LOPEZ ALIAGA")) return "López Aliaga";
-  if (n.includes("NIETO")) return "Nieto";
-  if (n.includes("SANCHEZ PALOMINO") || n.includes("SÁNCHEZ PALOMINO")) return "Sánchez Palomino";
-  if (n.includes("BELMONT")) return "Belmont";
-  const parts = full.trim().split(/\s+/);
-  return parts.length >= 3
-    ? parts[parts.length - 2][0] + parts[parts.length - 2].slice(1).toLowerCase()
-    : full;
+  if (n.includes("FUJIMORI")) return "Keiko Fujimori";
+  if (n.includes("LÓPEZ ALIAGA") || n.includes("LOPEZ ALIAGA")) return "Rafael L. Aliaga";
+  if (n.includes("NIETO")) return "Jorge Nieto";
+  if (n.includes("SANCHEZ PALOMINO") || n.includes("SÁNCHEZ PALOMINO")) return "Roberto Sánchez";
+  if (n.includes("BELMONT")) return "Ricardo Belmont";
+  // fallback: primer nombre + último apellido en title case
+  const parts = full.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    const tc = (s: string) => s[0] + s.slice(1).toLowerCase();
+    return `${tc(parts[0])} ${tc(parts[parts.length - 1])}`;
+  }
+  return full;
 }
 
 function parseCsv(text: string): Row[] {
