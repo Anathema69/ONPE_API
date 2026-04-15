@@ -21,6 +21,15 @@ export type EvolutionSeries = Candidate & {
 
 export type Scenario = { c1: string; c2: string; diff: number };
 
+export type JeeInfo = {
+  enviadasPct: number;
+  enviadas: number;
+  pendientesPct: number;
+  pendientes: number;
+  totalPct: number;
+  totalActas: number;
+} | null;
+
 export type AppData = {
   updatedAt: Date;
   totalActas: number;
@@ -31,6 +40,7 @@ export type AppData = {
   convergenceData: ConvergencePoint[];
   evolutionData: EvolutionSeries[];
   scenarios: Scenario[];
+  jee: JeeInfo;
 };
 
 type Row = {
@@ -115,14 +125,43 @@ function splitCsvLine(line: string): string[] {
 }
 
 export async function loadData(): Promise<AppData> {
-  const resp = await fetch("/data/onpe_history.csv", { cache: "no-cache" });
-  if (!resp.ok) throw new Error(`No se pudo cargar onpe_history.csv (${resp.status})`);
-  const text = await resp.text();
+  const [csvResp, jsonResp] = await Promise.all([
+    fetch("/data/onpe_history.csv", { cache: "no-cache" }),
+    fetch("/data/onpe_latest.json", { cache: "no-cache" }),
+  ]);
+  if (!csvResp.ok) throw new Error(`No se pudo cargar onpe_history.csv (${csvResp.status})`);
+  const text = await csvResp.text();
   const rows = parseCsv(text);
-  return shape(rows);
+
+  let jee: JeeInfo = null;
+  if (jsonResp.ok) {
+    try {
+      const snap = await jsonResp.json();
+      const enviadasPct = Number(snap.porcentajeActasEnviadasJee);
+      const pendientesPct = Number(snap.porcentajeActasPendientesJee);
+      if (Number.isFinite(enviadasPct) || Number.isFinite(pendientesPct)) {
+        const ePct = Number.isFinite(enviadasPct) ? enviadasPct : 0;
+        const pPct = Number.isFinite(pendientesPct) ? pendientesPct : 0;
+        const eN = Number(snap.actasEnviadasJee) || 0;
+        const pN = Number(snap.actasPendientesJee) || 0;
+        jee = {
+          enviadasPct: ePct,
+          enviadas: eN,
+          pendientesPct: pPct,
+          pendientes: pN,
+          totalPct: +(ePct + pPct).toFixed(3),
+          totalActas: eN + pN,
+        };
+      }
+    } catch {
+      // snapshot malformado: seguimos sin jee
+    }
+  }
+
+  return shape(rows, jee);
 }
 
-function shape(rows: Row[]): AppData {
+function shape(rows: Row[], jee: JeeInfo): AppData {
   // agrupar filas por snapshot (actualizadoAl)
   const bySnap = new Map<string, Row[]>();
   for (const r of rows) {
@@ -210,5 +249,6 @@ function shape(rows: Row[]): AppData {
     convergenceData,
     evolutionData,
     scenarios,
+    jee,
   };
 }

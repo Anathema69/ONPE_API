@@ -85,6 +85,13 @@ def fetch() -> dict:
         "actasContabilizadas": totales["contabilizadas"],
         "totalActas": totales["totalActas"],
         "participacionCiudadana": totales["participacionCiudadana"],
+        # actas en revisión JEE — material para interpretar márgenes ajustados
+        "porcentajeActasEnviadasJee": totales.get("actasEnviadasJee"),
+        "actasEnviadasJee": totales.get("enviadasJee"),
+        "porcentajeActasPendientesJee": totales.get("actasPendientesJee"),
+        "actasPendientesJee": totales.get("pendientesJee"),
+        "totalVotosEmitidos": totales.get("totalVotosEmitidos"),
+        "totalVotosValidos": totales.get("totalVotosValidos"),
         "top": [
             {
                 "posicion": i + 1,

@@ -1,7 +1,7 @@
 """
 Runner: ejecuta scrape_onpe.fetch() cada N minutos con jitter y backoff.
 Uso:
-    python run_loop.py --interval 30          # produccion: cada 30 min
+    python run_loop.py --interval 25          # produccion: cada 25 min
     python run_loop.py --interval 1 --cycles 5  # prueba: 5 iteraciones cada 1 min
 
 Para produccion real se recomienda Windows Task Scheduler invocando
@@ -69,8 +69,8 @@ def loop(interval_min: float, cycles: int | None) -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--interval", type=float, default=30,
-                    help="minutos entre corridas (default: 30)")
+    ap.add_argument("--interval", type=float, default=25,
+                    help="minutos entre corridas (default: 25)")
     ap.add_argument("--cycles", type=int, default=None,
                     help="numero de corridas; omitir para infinito")
     args = ap.parse_args()

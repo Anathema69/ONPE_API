@@ -1,5 +1,5 @@
 @echo off
-REM Task programado cada 30 min: scrape ONPE + deploy condicional a Vercel.
+REM Task programado cada 25 min: scrape ONPE + deploy condicional a Vercel.
 REM  1) scrape_onpe.py actualiza data/onpe_latest.json y data/onpe_history.csv
 REM  2) check_and_deploy.py compara actualizadoAl vs .last_deployed y si
 REM     cambio hace npm run build + vercel deploy --prod.

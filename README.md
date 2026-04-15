@@ -45,8 +45,8 @@ Genera:
 
 ## Programación
 
-Para ejecutar cada 20-30 minutos, usar Windows Task Scheduler o cron:
+Para ejecutar cada 25 minutos, usar Windows Task Scheduler o cron:
 
 ```
-*/30 * * * *  /ruta/a/venv/bin/python /ruta/a/scrape_onpe.py
+*/25 * * * *  /ruta/a/venv/bin/python /ruta/a/scrape_onpe.py
 ```

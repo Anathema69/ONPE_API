@@ -1,4 +1,4 @@
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceLine, ReferenceDot, Tooltip } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceDot, Tooltip } from 'recharts';
 import clsx from 'clsx';
 import type { AppData } from '../lib/history';
 import type { TooltipProps } from 'recharts';
@@ -64,8 +64,19 @@ export function Dashboard({ theme, data }: DashboardProps) {
 
   const {
     updatedAt, totalActas, pctActas, snapshotsCount, horasDeConteo,
-    top5, convergenceData, evolutionData,
+    top5, convergenceData, evolutionData, jee,
   } = data;
+
+  // margen más ajustado entre candidatos del 2° al 4°
+  const tightestMarginPp =
+    top5.length >= 3
+      ? Math.min(
+          ...[
+            top5[1] && top5[2] ? Math.abs(top5[1].percent - top5[2].percent) : Infinity,
+            top5[2] && top5[3] ? Math.abs(top5[2].percent - top5[3].percent) : Infinity,
+          ],
+        )
+      : Infinity;
 
   const leader = top5[0] ?? null;
   const gapToMajority = leader ? +(50 - leader.percent).toFixed(2) : null;
@@ -82,9 +93,18 @@ export function Dashboard({ theme, data }: DashboardProps) {
   const lastConvergence = convergenceData[convergenceData.length - 1] as
     | (Record<string, number> & { actas: number })
     | undefined;
-  const convergenceYMax = Math.ceil(
-    Math.max(...top5.map((c) => c.percent), 20) * 1.15,
+  // Dominio Y apretado a los datos reales: no partir de 0 (whitespace inútil)
+  // sino del mínimo observado menos un pad — así las líneas del pelotón
+  // ganan resolución vertical donde realmente se cruzan
+  const convergencePctValues = convergenceData.flatMap((p) =>
+    top5.map((c) => p[c.party]).filter((v): v is number => typeof v === 'number'),
   );
+  const convergenceYMin = convergencePctValues.length
+    ? Math.max(0, Math.floor(Math.min(...convergencePctValues) - 0.5))
+    : 0;
+  const convergenceYMax = convergencePctValues.length
+    ? Math.ceil(Math.max(...convergencePctValues) + 0.5)
+    : Math.ceil(Math.max(...top5.map((c) => c.percent), 20) * 1.15);
   const currentActas = Math.ceil(pctActas);
   const convergenceXTicks = (() => {
     const mid = Math.round((52 + currentActas) / 2);
@@ -211,7 +231,7 @@ export function Dashboard({ theme, data }: DashboardProps) {
                   tickFormatter={(val) => `${val}%`}
                 />
                 <YAxis
-                  domain={[0, convergenceYMax]}
+                  domain={[convergenceYMin, convergenceYMax]}
                   axisLine={false}
                   tickLine={false}
                   tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
@@ -221,12 +241,6 @@ export function Dashboard({ theme, data }: DashboardProps) {
                 <Tooltip
                   content={<ConvergenceTooltip />}
                   cursor={{ stroke: 'var(--text-meta)', strokeDasharray: '3 3', strokeWidth: 1 }}
-                />
-                <ReferenceLine
-                  y={10}
-                  stroke="var(--text-meta)"
-                  strokeDasharray="3 3"
-                  label={{ value: 'umbral 10%', position: 'insideTopLeft', fill: 'var(--text-meta)', fontFamily: 'var(--font-mono)', fontSize: 10 }}
                 />
                 {top5.map((c, i) => (
                   <Line
@@ -351,6 +365,68 @@ export function Dashboard({ theme, data }: DashboardProps) {
         </div>
       </section>
 
+      {/* 4.5 ZONA GRIS · ACTAS EN REVISIÓN JEE */}
+      {jee && (
+        <section className="w-full bg-[var(--color-terminal-bg)] text-[var(--color-terminal-fg)] py-12 md:py-16">
+          <div className="w-full max-w-7xl mx-auto px-4 flex flex-col gap-8">
+
+            <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-2 border-b border-[var(--color-terminal-rule)] pb-4">
+              <h2 className="text-h2 text-[var(--color-terminal-fg)]">Zona gris</h2>
+              <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">ACTAS FUERA DEL CÓMPUTO FIRME</span>
+            </div>
+
+            <div className="flex flex-col md:flex-row md:items-end gap-8 md:gap-16">
+              <div className="flex flex-col gap-2">
+                <span className="font-serif font-light text-[clamp(3rem,2rem+5vw,5rem)] leading-none tabular-nums text-[var(--color-accent-soft)]">
+                  {jee.totalPct.toFixed(2)}<span className="text-[0.4em] text-[var(--color-terminal-muted)]">%</span>
+                </span>
+                <span className="font-mono text-xs uppercase tracking-widest text-[var(--color-terminal-muted)]">
+                  {jee.totalActas.toLocaleString('es-PE')} actas en revisión del JEE
+                </span>
+              </div>
+
+              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-6 md:gap-10 md:border-l border-[var(--color-terminal-rule)] md:pl-10">
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">ENVIADAS AL JEE</span>
+                  <span className="font-mono text-2xl md:text-3xl tabular-nums text-[var(--color-terminal-fg)]">
+                    {jee.enviadasPct.toFixed(3)}%
+                  </span>
+                  <span className="font-mono text-xs text-[var(--color-terminal-muted)]">
+                    {jee.enviadas.toLocaleString('es-PE')} actas · en revisión activa del Jurado
+                  </span>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">PENDIENTES DE ENVÍO</span>
+                  <span className="font-mono text-2xl md:text-3xl tabular-nums text-[var(--color-terminal-fg)]">
+                    {jee.pendientesPct.toFixed(3)}%
+                  </span>
+                  <span className="font-mono text-xs text-[var(--color-terminal-muted)]">
+                    {jee.pendientes.toLocaleString('es-PE')} actas · en cola para revisión
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-body text-[var(--color-terminal-muted)] max-w-3xl border-t border-[var(--color-terminal-rule)] pt-6">
+              {Number.isFinite(tightestMarginPp) && tightestMarginPp < 2 ? (
+                <>
+                  El Jurado Electoral resuelve las impugnaciones y puede redistribuir votos entre candidaturas.{' '}
+                  <span className="text-[var(--color-terminal-fg)]">
+                    El margen más ajustado del top 5 es de {tightestMarginPp.toFixed(2)} pp
+                  </span>{' '}
+                  — {jee.totalActas.toLocaleString('es-PE')} actas son material suficiente para modificar el orden de quién pasa a segunda vuelta.
+                </>
+              ) : (
+                <>
+                  El Jurado Electoral resuelve las impugnaciones y puede redistribuir votos entre candidaturas.{' '}
+                  Estas {jee.totalActas.toLocaleString('es-PE')} actas son la franja de incertidumbre que queda por encima del conteo firme.
+                </>
+              )}
+            </p>
+          </div>
+        </section>
+      )}
+
       {/* 5. SEGUNDA VUELTA */}
       <section className="w-full max-w-7xl mx-auto px-4 py-16 flex flex-col gap-6">
         <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-2 border-b themed-border pb-3">
@@ -424,7 +500,7 @@ export function Dashboard({ theme, data }: DashboardProps) {
           <span className="text-xs-eyebrow text-[var(--color-ink-softer)]">METODOLOGÍA</span>
           <h3 className="text-h3 font-serif">De dónde salen estos números</h3>
           <p className="text-body font-serif text-[var(--color-ink-muted)]">
-            Los datos se extraen directamente de los endpoints públicos que alimentan el portal de resultados de la ONPE. Un proceso automático los captura cada 30 minutos y los guarda como historial. Los cortes anteriores al inicio del rastreo fueron reconstruidos desde capturas del portal y snapshots de Internet Archive.
+            Los datos se extraen directamente de los endpoints públicos que alimentan el portal de resultados de la ONPE. Un proceso automático los captura cada 25 minutos y los guarda como historial. Los cortes anteriores al inicio del rastreo fueron reconstruidos desde capturas del portal y snapshots de Internet Archive.
           </p>
           <p className="text-body font-serif text-[var(--color-ink-muted)]">
             Advertencia: el ritmo de escrutinio no es uniforme. Las primeras mesas contabilizadas suelen ser urbanas con mejor conectividad, no representativas del voto rural ni del voto en el extranjero que llega después. Los números antes del 10 % de actas son ruido, no señal.

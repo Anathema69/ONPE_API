@@ -1,19 +1,22 @@
-// Copia el CSV historico del scraper a public/data/ para que el build
-// de Vite lo sirva como asset estatico. Se ejecuta en prebuild/predev.
+// Copia el CSV historico + JSON del corte actual a public/data/ para que
+// Vite los sirva como assets estaticos. Se ejecuta en prebuild/predev.
 import { copyFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const src = resolve(__dirname, "../../data/onpe_history.csv");
+const srcDir = resolve(__dirname, "../../data");
 const destDir = resolve(__dirname, "../public/data");
-const dest = resolve(destDir, "onpe_history.csv");
-
-if (!existsSync(src)) {
-  console.warn(`[copy-data] CSV no encontrado en ${src}; continuando sin data.`);
-  process.exit(0);
-}
 
 mkdirSync(destDir, { recursive: true });
-copyFileSync(src, dest);
-console.log(`[copy-data] ${src} -> ${dest}`);
+
+for (const file of ["onpe_history.csv", "onpe_latest.json"]) {
+  const src = resolve(srcDir, file);
+  if (!existsSync(src)) {
+    console.warn(`[copy-data] ${file} no encontrado en ${src}; continuando.`);
+    continue;
+  }
+  const dest = resolve(destDir, file);
+  copyFileSync(src, dest);
+  console.log(`[copy-data] ${src} -> ${dest}`);
+}
