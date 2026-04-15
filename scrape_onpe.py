@@ -100,6 +100,13 @@ def save(snap: dict) -> None:
         json.dumps(snap, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
+    # evita duplicar filas si la ONPE aun no actualizo el snapshot
+    if CSV_PATH.exists():
+        with CSV_PATH.open(encoding="utf-8", newline="") as f:
+            if any(r.get("actualizadoAl") == snap["actualizadoAl"]
+                   for r in csv.DictReader(f)):
+                return
+
     new_file = not CSV_PATH.exists()
     with CSV_PATH.open("a", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
