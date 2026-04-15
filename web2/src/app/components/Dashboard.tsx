@@ -1,13 +1,62 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceLine, Tooltip, Legend } from 'recharts';
 import clsx from 'clsx';
 import type { AppData } from '../lib/history';
+import type { TooltipProps } from 'recharts';
+
+const SERIES_COLORS = ['#8B2E2E', '#3E5C76', '#6B7F59', '#B5884C', '#3F3A34'];
+
+// Tooltip customizado: hairline + lista de los 5 valores con puntos de color
+function ConvergenceTooltip({ active, payload, label }: TooltipProps<number, string>) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="font-mono text-xs border border-[var(--border-primary)] bg-[var(--bg-primary)] p-3 min-w-[180px]">
+      <div className="text-[var(--text-meta)] text-[0.7rem] uppercase tracking-widest mb-2">
+        {label}% actas contabilizadas
+      </div>
+      <div className="flex flex-col gap-1">
+        {payload.map((p) => (
+          <div key={p.dataKey as string} className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-[var(--text-primary)]">
+              <span className="inline-block w-2 h-2" style={{ background: p.color }} />
+              <span className="truncate max-w-[120px]">{p.dataKey as string}</span>
+            </span>
+            <span className="tabular-nums text-[var(--text-primary)]">{(p.value as number)?.toFixed(2)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Sparkline simple en SVG: linea + dot final. Ancho 100%, alto fijo.
+function Sparkline({ history, color }: { history: Array<{ pct: number }>; color: string }) {
+  if (history.length < 2) return null;
+  const W = 80, H = 20, PAD = 1;
+  const values = history.map((h) => h.pct);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 0.001);
+  const stepX = (W - PAD * 2) / (history.length - 1);
+  const points = history
+    .map((h, i) => {
+      const x = PAD + i * stepX;
+      const y = PAD + (H - PAD * 2) * (1 - (h.pct - min) / range);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+  const last = points.split(' ').pop()!.split(',');
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="shrink-0">
+      <polyline fill="none" stroke={color} strokeWidth="1.25" points={points} />
+      <circle cx={last[0]} cy={last[1]} r="1.6" fill={color} />
+    </svg>
+  );
+}
 
 interface DashboardProps {
   theme: 'light' | 'dark';
   data: AppData;
 }
-
-const SERIES_COLORS = ['#8B2E2E', '#3E5C76', '#6B7F59', '#B5884C', '#3F3A34'];
 
 export function Dashboard({ theme, data }: DashboardProps) {
   const isLight = theme === 'light';
@@ -69,18 +118,42 @@ export function Dashboard({ theme, data }: DashboardProps) {
 
           <div className="border-t border-[var(--color-terminal-rule)] pt-2">
             <div className="flex flex-col">
-              {top5.map((c) => (
-                <div key={c.id} className="grid grid-cols-[2.5rem_1fr_auto] md:grid-cols-[3rem_1fr_auto_6rem] gap-x-4 gap-y-1 py-4 border-b border-[var(--color-terminal-rule)] items-baseline">
-                  <span className="row-span-2 md:row-span-1 text-[var(--color-terminal-muted)] font-serif font-light text-3xl md:text-4xl self-start">{c.id}</span>
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs-eyebrow text-[var(--color-terminal-muted)] truncate">{c.party}</span>
-                    <span className="font-mono text-[var(--color-terminal-fg)] text-sm md:text-base tracking-tight truncate">{c.name}</span>
+              {top5.map((c, i) => {
+                const history = evolutionData[i]?.history ?? [];
+                const delta =
+                  history.length >= 2
+                    ? history[history.length - 1].pct - history[history.length - 2].pct
+                    : null;
+                const color = SERIES_COLORS[i % 5];
+                return (
+                  <div key={c.id} className="grid grid-cols-[2.25rem_1fr_auto] md:grid-cols-[3rem_1fr_auto_auto_6rem] gap-x-3 md:gap-x-4 gap-y-1 py-4 border-b border-[var(--color-terminal-rule)] items-center">
+                    <span className="row-span-2 md:row-span-1 text-[var(--color-terminal-muted)] font-serif font-light text-3xl md:text-4xl self-start leading-none">{c.id}</span>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs-eyebrow text-[var(--color-terminal-muted)] truncate">{c.party}</span>
+                      <span className="font-mono text-[var(--color-terminal-fg)] text-sm md:text-base tracking-tight truncate">{c.name}</span>
+                    </div>
+                    <span className="font-mono tabular-nums text-[var(--color-accent-soft)] text-lg md:text-2xl text-right self-center md:w-24">{c.percent.toFixed(3)}%</span>
+
+                    {/* segunda línea en móvil: sparkline + delta + votos */}
+                    <div className="col-start-2 col-span-2 md:col-span-1 md:col-start-3 flex items-center gap-3 md:gap-4 mt-1 md:mt-0">
+                      <Sparkline history={history} color={color} />
+                      {delta !== null && (
+                        <span className={clsx(
+                          'font-mono tabular-nums text-xs',
+                          delta > 0 ? 'text-[#A3BE8C]' : delta < 0 ? 'text-[#D4A59A]' : 'text-[var(--color-terminal-muted)]'
+                        )}>
+                          {delta > 0 ? '+' : ''}{delta.toFixed(2)}pp
+                        </span>
+                      )}
+                    </div>
+                    <span className="hidden md:block font-mono tabular-nums text-[var(--color-terminal-muted)] text-sm text-right">{c.votes}</span>
                   </div>
-                  <span className="font-mono tabular-nums text-[var(--color-accent-soft)] text-xl md:text-2xl md:w-24 text-right self-center">{c.percent.toFixed(3)}%</span>
-                  <span className="col-start-2 md:col-start-3 font-mono tabular-nums text-[var(--color-terminal-muted)] text-xs md:text-sm md:text-[var(--color-terminal-fg)] md:text-base md:text-right">{c.votes} votos</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
+            <p className="font-mono text-[0.7rem] text-[var(--color-terminal-muted)] uppercase tracking-widest mt-3">
+              Línea: evolución del candidato · Δ: cambio vs. corte anterior (puntos porcentuales)
+            </p>
           </div>
 
         </div>
@@ -95,23 +168,54 @@ export function Dashboard({ theme, data }: DashboardProps) {
         <p className="text-body themed-text-secondary max-w-3xl">
           Vista a partir del umbral donde la serie dejó de oscilar por muestras pequeñas. El eje horizontal es cuántas actas estaban contabilizadas en cada corte, no el tiempo.
         </p>
-        <div className="w-full h-[320px] md:h-[460px]">
+        <div className="w-full h-[380px] md:h-[480px]">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={convergenceData} margin={{ top: 10, right: 20, left: -10, bottom: 10 }}>
+            <LineChart data={convergenceData} margin={{ top: 10, right: 24, left: -6, bottom: 10 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-soft)" />
-              <XAxis dataKey="actas" type="number" domain={[52, 100]} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} tickFormatter={(val) => `${val}%`} />
-              <YAxis domain={[5, 20]} axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} tickFormatter={(val) => `${val}%`} />
-              <Tooltip
-                contentStyle={{ borderRadius: 0, border: '1px solid var(--border-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
-                itemStyle={{ color: 'var(--text-primary)' }}
-                labelFormatter={(v) => `${v}% actas`}
-                formatter={(val: number) => `${val.toFixed(2)}%`}
+              <XAxis
+                dataKey="actas"
+                type="number"
+                domain={[52, Math.min(100, Math.ceil(data.pctActas) + 3)]}
+                ticks={(() => {
+                  const cur = Math.ceil(data.pctActas);
+                  const base = [52, 60, 70, 80, 90].filter((t) => t <= cur - 4);
+                  return [...base, cur];
+                })()}
+                axisLine={false}
+                tickLine={false}
+                tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+                tickFormatter={(val) => `${val}%`}
               />
-              <ReferenceLine y={10} stroke="var(--text-meta)" strokeDasharray="3 3" />
+              <YAxis
+                domain={[5, 20]}
+                ticks={[5, 10, 15, 20]}
+                axisLine={false}
+                tickLine={false}
+                tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+                tickFormatter={(val) => `${val}%`}
+              />
+              <Tooltip
+                content={<ConvergenceTooltip />}
+                cursor={{ stroke: 'var(--text-meta)', strokeDasharray: '3 3', strokeWidth: 1 }}
+              />
+              <ReferenceLine y={10} stroke="var(--text-meta)" strokeDasharray="3 3" label={{ value: '10%', position: 'insideLeft', fill: 'var(--text-meta)', fontFamily: 'var(--font-mono)', fontSize: 10 }} />
               {top5.map((c, i) => (
-                <Line key={c.id} type="monotone" dataKey={c.party} stroke={SERIES_COLORS[i % 5]} strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} connectNulls />
+                <Line
+                  key={c.id}
+                  type="monotone"
+                  dataKey={c.party}
+                  stroke={SERIES_COLORS[i % 5]}
+                  strokeWidth={2}
+                  dot={{ r: 2.2, strokeWidth: 0 }}
+                  activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--bg-primary)' }}
+                  isAnimationActive={false}
+                  connectNulls
+                />
               ))}
-              <Legend wrapperStyle={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', paddingTop: '1rem' }} />
+              <Legend
+                wrapperStyle={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', paddingTop: '1rem' }}
+                iconType="plainline"
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -123,33 +227,36 @@ export function Dashboard({ theme, data }: DashboardProps) {
           <h2 className="text-h2 text-[var(--text-primary)]">Evolución del conteo</h2>
           <span className="text-xs-eyebrow themed-text-meta">Top 5 · a lo largo del tiempo</span>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {evolutionData.map((c) => (
-            <div key={c.id} className="themed-border border p-4 flex flex-col gap-3">
-              <div className="flex flex-col min-w-0">
-                <span className="text-xs-eyebrow themed-text-meta truncate" title={c.party}>{c.party}</span>
-                <span className="font-mono text-sm truncate" title={c.name}>{c.name.split(' ').slice(0, 3).join(' ')}</span>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4">
+          {evolutionData.map((c, i) => {
+            const color = SERIES_COLORS[i % 5];
+            return (
+              <div key={c.id} className="themed-border border p-3 md:p-4 flex flex-col gap-2 md:gap-3">
+                <div className="flex flex-col min-w-0">
+                  <span className="text-[0.65rem] md:text-xs themed-text-meta uppercase tracking-widest font-mono truncate" title={c.party}>{c.party}</span>
+                  <span className="font-mono text-xs md:text-sm truncate" title={c.name}>{c.name.split(' ').slice(-2).join(' ')}</span>
+                </div>
+                <div className="h-[60px] md:h-[100px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={c.history} margin={{ top: 4, right: 2, left: 2, bottom: 4 }}>
+                      <XAxis dataKey="date" hide />
+                      <YAxis domain={['dataMin - 0.5', 'dataMax + 0.5']} hide />
+                      <Tooltip
+                        contentStyle={{ borderRadius: 0, border: '1px solid var(--border-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '4px' }}
+                        labelStyle={{ color: 'var(--text-meta)' }}
+                        formatter={(val: number) => [`${val.toFixed(2)}%`, 'Votos']}
+                      />
+                      <Line type="monotone" dataKey="pct" stroke={color} strokeWidth={1.5} dot={false} activeDot={{ r: 3 }} isAnimationActive={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex justify-between items-baseline mt-auto">
+                  <span className="font-mono text-[0.65rem] md:text-xs themed-text-secondary">{c.history[0]?.date ?? ''} → {c.history.at(-1)?.date ?? ''}</span>
+                  <span className="font-mono text-sm md:text-lg tabular-nums" style={{ color }}>{c.percent.toFixed(2)}%</span>
+                </div>
               </div>
-              <div className="h-[120px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={c.history} margin={{ top: 5, right: 0, left: 0, bottom: 5 }}>
-                    <XAxis dataKey="date" hide />
-                    <YAxis domain={[0, 22]} hide />
-                    <Tooltip
-                      contentStyle={{ borderRadius: 0, border: '1px solid var(--border-primary)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '10px', padding: '4px' }}
-                      labelStyle={{ color: 'var(--text-meta)' }}
-                      formatter={(val: number) => [`${val.toFixed(2)}%`, 'Votos']}
-                    />
-                    <Line type="monotone" dataKey="pct" stroke="var(--color-accent)" strokeWidth={1.5} dot={{ r: 1.5, fill: 'var(--color-accent)' }} isAnimationActive={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex justify-between items-end mt-auto">
-                <span className="font-mono text-xs themed-text-secondary">{c.history[0]?.date ?? ''} → {c.history.at(-1)?.date ?? ''}</span>
-                <span className="font-mono text-lg tabular-nums text-[var(--color-accent)]">{c.percent.toFixed(2)}%</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
