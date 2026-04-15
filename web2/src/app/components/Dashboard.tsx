@@ -167,10 +167,17 @@ export function Dashboard({ theme, data }: DashboardProps) {
             <div className="flex flex-col">
               {top5.map((c, i) => {
                 const history = evolutionData[i]?.history ?? [];
-                // Δ = cambio desde el primer corte con actas ≥ 52% (base de convergencia)
-                // hasta el corte actual — más informativo que corte-a-corte inmediato
-                const firstConv = convergenceData[0];
-                const lastConv = convergenceData[convergenceData.length - 1];
+                // Δ = cambio desde el primer corte (≥52% actas) donde el
+                // candidato aparece, hasta el corte actual. El scraper solo
+                // guarda top5 por snapshot, así que candidatos que entraron
+                // al top tarde no tienen datos en el primer corte al 52% —
+                // en ese caso usamos el primero disponible para ese candidato.
+                const firstConv = convergenceData.find(
+                  (p) => typeof p[c.party] === 'number',
+                );
+                const lastConv = [...convergenceData]
+                  .reverse()
+                  .find((p) => typeof p[c.party] === 'number');
                 const fromPct = firstConv?.[c.party];
                 const toPct = lastConv?.[c.party];
                 const delta =
@@ -190,12 +197,27 @@ export function Dashboard({ theme, data }: DashboardProps) {
                     {/* segunda línea en móvil: sparkline + delta + votos */}
                     <div className="col-start-2 col-span-2 md:col-span-1 md:col-start-3 flex items-center gap-3 md:gap-4 mt-1 md:mt-0">
                       <Sparkline history={history} color={color} />
-                      {delta !== null && (
-                        <span className={clsx(
-                          'font-mono tabular-nums text-xs',
-                          delta > 0 ? 'text-[#A3BE8C]' : delta < 0 ? 'text-[#D4A59A]' : 'text-[var(--color-terminal-muted)]'
-                        )}>
+                      {delta !== null ? (
+                        <span
+                          className={clsx(
+                            'font-mono tabular-nums text-xs w-16 text-right shrink-0',
+                            delta > 0
+                              ? 'text-[#A3BE8C]'
+                              : delta < 0
+                                ? 'text-[#D4A59A]'
+                                : 'text-[var(--color-terminal-muted)]',
+                          )}
+                          title={
+                            firstConv
+                              ? `Base: ${(firstConv.actas as number).toFixed(2)}% actas`
+                              : undefined
+                          }
+                        >
                           {delta > 0 ? '+' : ''}{delta.toFixed(2)}pp
+                        </span>
+                      ) : (
+                        <span className="font-mono text-xs text-[var(--color-terminal-muted)] w-16 text-right shrink-0">
+                          —
                         </span>
                       )}
                     </div>

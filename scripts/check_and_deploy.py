@@ -31,7 +31,12 @@ WEB_DIR = ROOT / "web2"
 
 def run(cmd: list[str], cwd: Path | None = None, env: dict | None = None) -> int:
     print(f"  [$] {' '.join(cmd)}  (cwd={cwd or ROOT})", flush=True)
-    return subprocess.run(cmd, cwd=cwd or ROOT, env=env, shell=False).returncode
+    # En Windows: CREATE_NO_WINDOW evita que vercel.cmd (y sus hijos node.exe)
+    # abran ventanas cmd cuando la tarea corre en segundo plano via wscript.
+    kwargs: dict = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    return subprocess.run(cmd, cwd=cwd or ROOT, env=env, shell=False, **kwargs).returncode
 
 
 def main() -> int:
