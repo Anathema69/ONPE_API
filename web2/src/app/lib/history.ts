@@ -32,10 +32,12 @@ export type JeeInfo = {
 
 export type AppData = {
   updatedAt: Date;
+  startedAt: Date;
   totalActas: number;
   pctActas: number;
   snapshotsCount: number;
   horasDeConteo: number;
+  diasDeConteo: number;
   top5: Candidate[];
   convergenceData: ConvergencePoint[];
   evolutionData: EvolutionSeries[];
@@ -241,13 +243,16 @@ function shape(rows: Row[], jee: JeeInfo): AppData {
       : [];
 
   const horas = (last.timestamp.getTime() - first.timestamp.getTime()) / 36e5;
+  const dias = horas / 24;
 
   return {
     updatedAt: last.timestamp,
+    startedAt: first.timestamp,
     totalActas: last.totalActas,
     pctActas: last.pctActas,
     snapshotsCount: snaps.length,
     horasDeConteo: +horas.toFixed(1),
+    diasDeConteo: +dias.toFixed(1),
     top5,
     convergenceData,
     evolutionData,

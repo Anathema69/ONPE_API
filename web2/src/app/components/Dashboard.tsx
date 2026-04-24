@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceDot, ReferenceArea, ReferenceLine, Tooltip, Brush } from 'recharts';
+import { useMemo } from 'react';
+import { LineChart, Line, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, ReferenceDot, ReferenceLine, Tooltip, Customized } from 'recharts';
 import clsx from 'clsx';
 import type { AppData, Candidate } from '../lib/history';
 import { shortName } from '../lib/history';
@@ -51,41 +51,6 @@ function Sparkline({ history, color }: { history: Array<{ pct: number }>; color:
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="shrink-0">
       <polyline fill="none" stroke={color} strokeWidth="1.25" points={points} />
       <circle cx={last[0]} cy={last[1]} r="1.6" fill={color} />
-    </svg>
-  );
-}
-
-// Sparkline del margen 2°-3° con línea del cero (empate).
-// Ancho fluido: escala al contenedor via preserveAspectRatio="none".
-function MarginSparkline({ history }: { history: Array<{ diff: number }> }) {
-  if (history.length < 2) return null;
-  const W = 220, H = 42, PAD = 2;
-  const values = history.map((h) => h.diff);
-  const min = Math.min(0, ...values);
-  const max = Math.max(0, ...values);
-  const range = Math.max(max - min, 0.001);
-  const stepX = (W - PAD * 2) / (history.length - 1);
-  const toY = (v: number) => PAD + (H - PAD * 2) * (1 - (v - min) / range);
-  const zeroY = toY(0);
-  const points = history
-    .map((h, i) => `${(PAD + i * stepX).toFixed(1)},${toY(h.diff).toFixed(1)}`)
-    .join(' ');
-  const lastIdx = history.length - 1;
-  const lastX = PAD + lastIdx * stepX;
-  const lastY = toY(history[lastIdx].diff);
-  return (
-    <svg
-      width="100%"
-      height={H}
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className="shrink-0"
-      role="img"
-      aria-label="trayectoria del margen entre 2° y 3°"
-    >
-      <line x1={PAD} y1={zeroY} x2={W - PAD} y2={zeroY} stroke="var(--text-meta)" strokeDasharray="2 3" strokeWidth={0.75} />
-      <polyline fill="none" stroke="var(--text-primary)" strokeWidth="1.5" points={points} />
-      <circle cx={lastX} cy={lastY} r="2.2" fill="var(--text-primary)" />
     </svg>
   );
 }
@@ -153,12 +118,11 @@ export function Dashboard({ theme, data }: DashboardProps) {
   const themeClass = isLight ? 'theme-light' : 'theme-dark';
 
   const {
-    updatedAt, totalActas, pctActas, snapshotsCount, horasDeConteo,
+    updatedAt, startedAt, totalActas, pctActas, snapshotsCount, horasDeConteo, diasDeConteo,
     top5, convergenceData, evolutionData, jee,
   } = data;
 
   const leader = top5[0] ?? null;
-  const gapToMajority = leader ? +(50 - leader.percent).toFixed(2) : null;
   const lastConvergence = convergenceData[convergenceData.length - 1] as
     | (Record<string, number> & { actas: number })
     | undefined;
@@ -182,24 +146,10 @@ export function Dashboard({ theme, data }: DashboardProps) {
       : [52, currentActas];
   })();
 
-  // A5 · Vista de la gráfica: todas las candidaturas o solo el pelotón 2°-4°
-  const [view, setView] = useState<'all' | 'pack'>('all');
-  const packCandidates = top5.slice(1, 4);
-  const visibleCandidates = view === 'pack' ? packCandidates : top5;
-
-  const packPctValues = convergenceData.flatMap((p) =>
-    packCandidates
-      .map((c) => p[c.party])
-      .filter((v): v is number => typeof v === 'number'),
-  );
-  const packYMin = packPctValues.length
-    ? Math.max(0, +(Math.min(...packPctValues) - 0.3).toFixed(2))
-    : convergenceYMin;
-  const packYMax = packPctValues.length
-    ? +(Math.max(...packPctValues) + 0.3).toFixed(2)
-    : convergenceYMax;
-  const yDomain: [number, number] =
-    view === 'pack' ? [packYMin, packYMax] : [convergenceYMin, convergenceYMax];
+  // Vista única — sin toggle. El direct labeling al final de cada línea
+  // hace redundante la pack-view: el lector identifica las líneas por nombre.
+  const visibleCandidates = top5;
+  const yDomain: [number, number] = [convergenceYMin, convergenceYMax];
 
   // A4 · Datos del pelotón del balotaje (2° vs 3°)
   const p2Party = top5[1]?.party;
@@ -266,115 +216,79 @@ export function Dashboard({ theme, data }: DashboardProps) {
     return out;
   }, [convergenceData, top5]);
 
-  // Brush de la gráfica del margen: controlado por startIndex/endIndex.
-  // Arranca por default en los últimos ~15 pp de actas (donde se define el balotaje).
-  // El lector que quiera ver el recorrido completo arrastra el borde izquierdo.
-  const computeDefaultBrush = useCallback((): { start?: number; end?: number } => {
-    if (marginHistory.length < 2) return {};
-    const lastIdx = marginHistory.length - 1;
-    const cutoff = marginHistory[lastIdx].actas - 15;
-    const startIdx = marginHistory.findIndex((p) => p.actas >= cutoff);
-    return startIdx > 0 ? { start: startIdx, end: lastIdx } : {};
-  }, [marginHistory]);
-
-  const [marginBrush, setMarginBrush] = useState<{ start?: number; end?: number }>(computeDefaultBrush);
-  const [brushTouched, setBrushTouched] = useState(false);
-
-  // Cuando llega un nuevo snapshot (marginHistory crece), mantener el Brush coherente:
-  // - Si el usuario no lo movió, re-computar el default sobre la nueva data.
-  // - Si lo movió pero su end estaba pegado al último punto, trasladarlo al nuevo último
-  //   (sticky-end) para no dejar al recién llegado fuera del zoom.
-  const prevLenRef = useRef(marginHistory.length);
-  useEffect(() => {
-    const prev = prevLenRef.current;
-    const cur = marginHistory.length;
-    prevLenRef.current = cur;
-    if (cur < 2 || cur === prev) return;
-    if (!brushTouched) {
-      setMarginBrush(computeDefaultBrush());
-      return;
-    }
-    setMarginBrush((b) => {
-      if (b.end !== undefined && b.end === prev - 1) {
-        return { ...b, end: cur - 1 };
-      }
-      return b;
-    });
-  }, [marginHistory, brushTouched, computeDefaultBrush]);
-
-  // Puntos dentro del Brush (o todos si no hay zoom)
-  const marginVisible = useMemo(() => {
-    if (
-      marginBrush.start === undefined ||
-      marginBrush.end === undefined ||
-      marginHistory.length === 0
-    ) {
-      return marginHistory;
-    }
-    return marginHistory.slice(marginBrush.start, marginBrush.end + 1);
-  }, [marginHistory, marginBrush]);
-
-  // Dominio Y de la gráfica del margen: centrado en 0 y recalculado sobre los puntos visibles.
-  // Si la banda JEE (±jee.totalPct/2) es mucho mayor que el rango visible, se excluye del cálculo
-  // y queda fuera del viewport — marginJeeOutOfView lo señaliza.
+  // Sin Brush: con el cómputo cerrado, la narrativa es el recorrido completo.
+  // El dominio Y se centra en 0 y escala al máximo absoluto observado, con un
+  // pad de 15% y considerando la banda JEE si cabe en el mismo orden de magnitud.
   const marginYDomain: [number, number] = useMemo(() => {
-    const points = marginVisible.length > 0 ? marginVisible : marginHistory;
-    if (points.length === 0) return [-1, 1];
-    const dataAbs = Math.max(...points.map((p) => Math.abs(p.diff)), 0.1);
+    if (marginHistory.length === 0) return [-1, 1];
+    const dataAbs = Math.max(...marginHistory.map((p) => Math.abs(p.diff)), 0.1);
     const jeeHalf = jee ? jee.totalPct / 2 : 0;
     const includeJee = jeeHalf > 0 && jeeHalf <= dataAbs * 4;
     const absMax = includeJee ? Math.max(dataAbs, jeeHalf) : dataAbs;
     const pad = absMax * 0.15;
     return [-(absMax + pad), absMax + pad];
-  }, [marginVisible, marginHistory, jee]);
+  }, [marginHistory, jee]);
 
   const marginJeeOutOfView = useMemo(() => {
     if (!jee) return false;
     return jee.totalPct / 2 > marginYDomain[1];
   }, [marginYDomain, jee]);
 
-  const actualizadoAlStr = updatedAt.toLocaleString('es-PE', {
+  // Offset del cero para el gradient split (above/below zero).
+  // El gradient va de yDomainMax (top, offset=0) a yDomainMin (bottom, offset=1).
+  const zeroOffset = useMemo(() => {
+    const [lo, hi] = marginYDomain;
+    if (hi === lo) return 0.5;
+    return hi / (hi - lo);
+  }, [marginYDomain]);
+
+  const corteFinalStr = updatedAt.toLocaleString('es-PE', {
     timeZone: 'America/Lima',
     day: '2-digit', month: 'long', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   }).toUpperCase();
+  const inicioConteoStr = startedAt.toLocaleDateString('es-PE', {
+    timeZone: 'America/Lima',
+    day: '2-digit', month: 'long',
+  }).toUpperCase();
+  const finConteoStr = updatedAt.toLocaleDateString('es-PE', {
+    timeZone: 'America/Lima',
+    day: '2-digit', month: 'long',
+  }).toUpperCase();
   const totalActasStr = totalActas.toLocaleString('es-PE');
+  const diasEnteros = Math.max(1, Math.round(diasDeConteo));
+  const packTrailing = top5.slice(1, 5);
 
   return (
     <div className={clsx(themeClass, 'themed-container min-h-screen w-full overflow-x-hidden flex flex-col items-center')}>
 
-      {/* 1. HERO · Titular data-driven: recta final vs. conteo temprano */}
+      {/* 1. HERO · Cierre del cómputo ONPE + pase al JEE */}
       <section className="w-full max-w-7xl mx-auto px-4 py-16 md:py-24">
         <div className="flex flex-col gap-6 max-w-4xl">
           <span className="text-xs-eyebrow themed-text-meta">
             ELECCIONES GENERALES · PERÚ 2026 · PRESIDENCIALES
           </span>
           <h1 className="text-hero text-[var(--text-primary)]">
-            {leader && currentMargin2v3 !== null && leader.percent < 50 && Math.abs(currentMargin2v3) < 2 ? (
+            {leader && currentMargin2v3 !== null && Math.abs(currentMargin2v3) < 2 ? (
               <>
-                El primer puesto está{' '}
-                <i className="not-italic text-[var(--color-accent)] font-serif">sellado</i>.
-                {' '}El balotaje se decide por{' '}
+                El cómputo ONPE{' '}
+                <i className="not-italic text-[var(--color-accent)] font-serif">cerró</i>{' '}
+                al{' '}
+                <span className="tabular-nums">{pctActas.toFixed(3)}</span>%.
+                {' '}El balotaje, decidido por{' '}
                 <span className="tabular-nums">{Math.abs(currentMargin2v3).toFixed(3)}</span>{' '}
-                puntos
-                {jee && (
-                  <>
-                    {' '}y{' '}
-                    <span className="tabular-nums">{jee.totalActas.toLocaleString('es-PE')}</span>{' '}
-                    actas
-                  </>
-                )}.
+                puntos, queda en manos del JEE hasta mayo.
               </>
             ) : (
               <>
-                Un conteo{' '}
-                <i className="not-italic text-[var(--color-accent)] font-serif">en tiempo real</i>{' '}
-                sin prisa por declarar ganador.
+                El cómputo ONPE{' '}
+                <i className="not-italic text-[var(--color-accent)] font-serif">cerró</i>.
+                {' '}La resolución de actas pendientes queda en manos del JEE hasta mayo.
               </>
             )}
           </h1>
           <p className="text-body themed-text-secondary max-w-3xl">
-            Seguimiento de los resultados preliminares publicados por la ONPE. {snapshotsCount} cortes registrados a lo largo de {horasDeConteo} horas de escrutinio. Este sitio no proyecta ganadores: describe lo que la matemática del conteo ya fija y lo que todavía está abierto.
+            Registro del cierre del cómputo preliminar publicado por la ONPE. {snapshotsCount} cortes a lo largo de {diasEnteros} días de escrutinio, del {inicioConteoStr} al {finConteoStr}. Este sitio no proyecta ganadores: describe lo que la matemática del conteo ya fijó y lo que todavía puede moverse cuando el Jurado resuelva las impugnaciones.
           </p>
         </div>
       </section>
@@ -384,8 +298,8 @@ export function Dashboard({ theme, data }: DashboardProps) {
         <div className="w-full max-w-7xl mx-auto px-4 flex flex-col gap-8">
 
           <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-2 md:gap-4 border-b border-[var(--color-terminal-rule)] pb-4">
-            <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">CÓMPUTO PRESIDENCIAL · CORTE ACTUAL</span>
-            <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">ACTUALIZADO AL {actualizadoAlStr}</span>
+            <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">CÓMPUTO PRESIDENCIAL · CIERRE</span>
+            <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">CORTE FINAL · {corteFinalStr}</span>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 gap-8 md:gap-16 lg:gap-32 py-4">
@@ -481,487 +395,437 @@ export function Dashboard({ theme, data }: DashboardProps) {
               })}
             </div>
             <p className="font-mono text-[0.7rem] text-[var(--color-terminal-muted)] uppercase tracking-widest mt-3">
-              Línea: evolución del candidato · Δ: cambio desde el 52% de actas contabilizadas (puntos porcentuales)
+              Línea: trayectoria durante el cierre · Δ: cambio desde el 52% de actas contabilizadas hasta el corte final (puntos porcentuales)
             </p>
           </div>
-
-          {/* C4 · Zona gris integrada como footer de Estado Actual (antes era una section separada) */}
-          {jee && (
-            <div className="border-t border-[var(--color-terminal-rule)] pt-6 flex flex-col gap-4">
-              <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
-                <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">Zona gris · actas en revisión JEE</span>
-                <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">Fuera del cómputo firme</span>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-end gap-6 md:gap-12">
-                <div className="flex flex-col gap-1">
-                  <span className="font-serif font-light text-[clamp(2.25rem,1.75rem+3vw,4rem)] leading-none tabular-nums text-[var(--color-accent-soft)]">
-                    {jee.totalPct.toFixed(2)}
-                    <span className="text-[0.4em] text-[var(--color-terminal-muted)]">%</span>
-                  </span>
-                  <span className="font-mono text-xs text-[var(--color-terminal-muted)]">
-                    {jee.totalActas.toLocaleString('es-PE')} actas en total
-                  </span>
-                </div>
-
-                <div className="flex-1 grid grid-cols-2 gap-4 md:gap-10 md:border-l border-[var(--color-terminal-rule)] md:pl-10">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">Enviadas al JEE</span>
-                    <span className="font-mono text-xl md:text-2xl tabular-nums text-[var(--color-terminal-fg)]">
-                      {jee.enviadasPct.toFixed(3)}%
-                    </span>
-                    <span className="font-mono text-[0.7rem] text-[var(--color-terminal-muted)]">
-                      {jee.enviadas.toLocaleString('es-PE')} actas
-                    </span>
-                  </div>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-xs-eyebrow text-[var(--color-terminal-muted)]">Pendientes de envío</span>
-                    <span className="font-mono text-xl md:text-2xl tabular-nums text-[var(--color-terminal-fg)]">
-                      {jee.pendientesPct.toFixed(3)}%
-                    </span>
-                    <span className="font-mono text-[0.7rem] text-[var(--color-terminal-muted)]">
-                      {jee.pendientes.toLocaleString('es-PE')} actas
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <p className="text-body text-[var(--color-terminal-muted)] max-w-3xl">
-                El Jurado Electoral resuelve las impugnaciones y puede redistribuir votos entre candidaturas.
-                {currentMargin2v3 !== null && Math.abs(currentMargin2v3) < 2 ? (
-                  <>
-                    {' '}
-                    <span className="text-[var(--color-terminal-fg)]">
-                      El margen 2°–3° es {Math.abs(currentMargin2v3).toFixed(3)} pp
-                    </span>
-                    {' '}— estas {jee.totalActas.toLocaleString('es-PE')} actas son{' '}
-                    <span className="tabular-nums text-[var(--color-terminal-fg)]">
-                      {(jee.totalPct / Math.max(Math.abs(currentMargin2v3), 0.001)).toFixed(0)}×
-                    </span>{' '}
-                    más grandes que el margen: material suficiente para modificar quién pasa a segunda vuelta.
-                  </>
-                ) : (
-                  <>
-                    {' '}
-                    Estas {jee.totalActas.toLocaleString('es-PE')} actas son la franja de incertidumbre que queda por encima del conteo firme.
-                  </>
-                )}
-              </p>
-            </div>
-          )}
 
         </div>
       </section>
 
-      {/* 3. CONVERGENCIA */}
-      <section className="w-full max-w-7xl mx-auto px-4 py-16 md:py-24 flex flex-col gap-6">
+      {/* 2B. LO QUE EL JEE TIENE EN SUS MANOS (promovido desde footer del terminal) */}
+      {jee && (
+        <section className="w-full max-w-7xl mx-auto px-4 py-16 md:py-24 flex flex-col gap-6">
+          <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-2 border-b themed-border pb-3">
+            <h2 className="text-h2 text-[var(--text-primary)]">Lo que el JEE todavía puede mover</h2>
+            <span className="text-xs-eyebrow themed-text-meta">Actas fuera del cómputo firme · resuelve hasta mayo</span>
+          </div>
+          <p className="text-body themed-text-secondary max-w-3xl">
+            El cómputo ONPE quedó en {pctActas.toFixed(3)}%. El resto son actas observadas que el Jurado Electoral revisa y resuelve una a una; el plazo oficial se extiende hasta mayo de 2026. Mientras no se resuelvan, el orden de llegada al balotaje no está sellado.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-[auto_1fr] gap-6 md:gap-10 themed-border border p-5 md:p-8">
+            <div className="flex flex-col gap-1 md:border-r themed-border md:pr-10 md:min-w-[14rem]">
+              <span className="text-xs-eyebrow themed-text-meta">Actas en revisión JEE</span>
+              <span className="font-serif font-light text-[clamp(3rem,2rem+5vw,5.5rem)] leading-none tabular-nums text-[var(--color-accent)]">
+                {jee.totalPct.toFixed(2)}
+                <span className="text-[0.35em] themed-text-meta">%</span>
+              </span>
+              <span className="font-mono text-sm themed-text-secondary tabular-nums">
+                {jee.totalActas.toLocaleString('es-PE')} actas
+              </span>
+              {currentMargin2v3 !== null && Math.abs(currentMargin2v3) > 0 && (
+                <span className="font-mono text-xs themed-text-meta mt-3 leading-relaxed max-w-[16rem]">
+                  <span className="tabular-nums text-[var(--text-primary)]">
+                    {(jee.totalPct / Math.max(Math.abs(currentMargin2v3), 0.001)).toFixed(0)}×
+                  </span>{' '}
+                  el margen actual entre 2° y 3°.
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-5">
+              <div className="grid grid-cols-2 gap-5 md:gap-8">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs-eyebrow themed-text-meta">Enviadas al JEE</span>
+                  <span className="font-mono text-2xl md:text-3xl tabular-nums text-[var(--text-primary)]">
+                    {jee.enviadasPct.toFixed(3)}%
+                  </span>
+                  <span className="font-mono text-[0.75rem] themed-text-secondary">
+                    {jee.enviadas.toLocaleString('es-PE')} actas en mesa del Jurado
+                  </span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-xs-eyebrow themed-text-meta">Pendientes de envío</span>
+                  <span className="font-mono text-2xl md:text-3xl tabular-nums text-[var(--text-primary)]">
+                    {jee.pendientesPct.toFixed(3)}%
+                  </span>
+                  <span className="font-mono text-[0.75rem] themed-text-secondary">
+                    {jee.pendientes.toLocaleString('es-PE')} actas sin remitir
+                  </span>
+                </div>
+              </div>
+
+              {/* Micro-escenarios: cómo puede reordenar el JEE al pelotón 2°-5° */}
+              {top5[1] && top5[2] && currentMargin2v3 !== null && (
+                <div className="flex flex-col gap-2 pt-4 border-t themed-border-soft">
+                  <span className="text-xs-eyebrow themed-text-meta">Escenarios posibles del reordenamiento</span>
+                  <ul className="flex flex-col gap-2 font-mono text-sm themed-text-secondary">
+                    <li className="flex gap-3">
+                      <span className="themed-text-meta tabular-nums shrink-0">A ·</span>
+                      <span>
+                        El Jurado valida las actas sin alterar proporciones →{' '}
+                        <span className="text-[var(--text-primary)]">
+                          {shortName(top5[1].name)}
+                        </span>{' '}
+                        mantiene el 2° lugar y el balotaje se confirma.
+                      </span>
+                    </li>
+                    <li className="flex gap-3">
+                      <span className="themed-text-meta tabular-nums shrink-0">B ·</span>
+                      <span>
+                        Las observaciones se concentran en distritos donde{' '}
+                        <span className="text-[var(--text-primary)]">
+                          {shortName(top5[1].name)}
+                        </span>{' '}
+                        era fuerte → el margen de {Math.abs(currentMargin2v3).toFixed(3)} pp se revierte y{' '}
+                        <span className="text-[var(--text-primary)]">
+                          {shortName(top5[2].name)}
+                        </span>{' '}
+                        pasa al balotaje.
+                      </span>
+                    </li>
+                    {packTrailing[2] && (
+                      <li className="flex gap-3">
+                        <span className="themed-text-meta tabular-nums shrink-0">C ·</span>
+                        <span>
+                          La redistribución beneficia a{' '}
+                          <span className="text-[var(--text-primary)]">
+                            {shortName(packTrailing[2].name)}
+                          </span>
+                          : improbable pero no excluido mientras queden{' '}
+                          {jee.totalActas.toLocaleString('es-PE')} actas sin resolver.
+                        </span>
+                      </li>
+                    )}
+                  </ul>
+                  <p className="font-mono text-[0.7rem] themed-text-meta mt-2 italic normal-case leading-relaxed">
+                    No son proyecciones: son lecturas cualitativas del rango en el que puede moverse el 2° lugar mientras el Jurado resuelve.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* 3. CONVERGENCIA · rediseñada con direct labeling, sin toggle, sin sidebar */}
+      <section className="w-full max-w-7xl mx-auto px-4 py-16 md:py-24 flex flex-col gap-5">
         <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-2 border-b themed-border pb-3">
           <h2 className="text-h2 text-[var(--text-primary)]">Convergencia desde el 52%</h2>
-          <span className="text-xs-eyebrow themed-text-meta">% votos válidos vs. % actas contabilizadas</span>
+          <span className="text-xs-eyebrow themed-text-meta">Trayectoria del voto por candidato</span>
         </div>
         <p className="text-body themed-text-secondary max-w-3xl">
-          Vista a partir del umbral donde la serie dejó de oscilar por muestras pequeñas. El eje horizontal es cuántas actas estaban contabilizadas en cada corte, no el tiempo.
+          El recorrido desde el umbral en que la serie dejó de oscilar por muestras pequeñas hasta el cierre del cómputo. El eje horizontal es el porcentaje de actas contabilizadas, no el tiempo.
         </p>
 
-        {/* A5 · Toggle de vista */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs-eyebrow themed-text-meta">VISTA</span>
-          <div className="inline-flex border themed-border">
-            <button
-              type="button"
-              onClick={() => setView('all')}
-              aria-pressed={view === 'all'}
-              className={clsx(
-                'px-3 py-1.5 font-mono text-xs uppercase tracking-widest transition-colors',
-                view === 'all'
-                  ? 'bg-[var(--text-primary)] text-[var(--bg-primary)]'
-                  : 'themed-text-secondary hover:text-[var(--text-primary)]',
-              )}
-            >
-              Las 5 candidaturas
-            </button>
-            <button
-              type="button"
-              onClick={() => setView('pack')}
-              aria-pressed={view === 'pack'}
-              className={clsx(
-                'px-3 py-1.5 font-mono text-xs uppercase tracking-widest transition-colors border-l themed-border',
-                view === 'pack'
-                  ? 'bg-[var(--text-primary)] text-[var(--bg-primary)]'
-                  : 'themed-text-secondary hover:text-[var(--text-primary)]',
-              )}
-            >
-              Pelotón 2°–4°
-            </button>
+        <div className="flex flex-col gap-4">
+          <p className="sr-only">
+            Gráfica de convergencia: {top5.length > 0 && leader ? `${shortName(leader.name)} lidera con ${leader.percent.toFixed(2)}% de votos válidos` : 'cargando'}
+            {top5[1] && top5[2] && currentMargin2v3 !== null && (
+              ` al ${pctActas.toFixed(1)}% de actas contabilizadas. En el pelotón por el segundo lugar, ${shortName(top5[1].name)} tiene ${top5[1].percent.toFixed(2)}% y ${shortName(top5[2].name)} ${top5[2].percent.toFixed(2)}%, un margen de ${Math.abs(currentMargin2v3).toFixed(3)} puntos porcentuales.`
+            )}
+          </p>
+
+          {/* Eyebrow del eje Y: unidad una sola vez, editorial */}
+          <div className="flex items-baseline justify-between">
+            <span className="text-xs-eyebrow themed-text-meta">% votos válidos</span>
+            <span className="text-xs-eyebrow themed-text-meta">cierre · {pctActas.toFixed(2)}% actas</span>
           </div>
-          {view === 'pack' && (
-            <span className="font-mono text-xs themed-text-meta">
-              Y apretado a {packYMin.toFixed(1)}% – {packYMax.toFixed(1)}% para resolver el cruce
-            </span>
-          )}
-        </div>
 
-        <div className="flex flex-col md:flex-row gap-4 md:gap-6 themed-border border p-3 md:p-4">
-          <div className="flex flex-col flex-1 min-w-0 gap-3">
-            <p className="sr-only">
-              Gráfica de convergencia: {top5.length > 0 && leader ? `${shortName(leader.name)} lidera con ${leader.percent.toFixed(2)}% de votos válidos` : 'cargando'}
-              {top5[1] && top5[2] && currentMargin2v3 !== null && (
-                ` al ${pctActas.toFixed(1)}% de actas contabilizadas. En el pelotón por el segundo lugar, ${shortName(top5[1].name)} tiene ${top5[1].percent.toFixed(2)}% y ${shortName(top5[2].name)} ${top5[2].percent.toFixed(2)}%, un margen de ${Math.abs(currentMargin2v3).toFixed(3)} puntos porcentuales.`
-              )}
-            </p>
-            <div
-              className="w-full h-[360px] md:h-[480px]"
-              role="img"
-              aria-label={`Convergencia de votos por candidato desde el 52% hasta el ${currentActas}% de actas`}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={convergenceData} margin={{ top: 10, right: 12, left: -12, bottom: 10 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-soft)" />
-                  <XAxis
-                    dataKey="actas"
-                    type="number"
-                    domain={[52, Math.min(100, currentActas + 1)]}
-                    ticks={convergenceXTicks}
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
-                    tickFormatter={(val) => `${val}%`}
-                  />
-                  <YAxis
-                    domain={yDomain}
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
-                    tickFormatter={(val) => `${val}%`}
-                    width={40}
-                    allowDecimals={view === 'pack'}
-                  />
-                  <Tooltip
-                    content={<ConvergenceTooltip />}
-                    cursor={{ stroke: 'var(--text-meta)', strokeDasharray: '3 3', strokeWidth: 1 }}
-                  />
+          <div
+            className="w-full h-[380px] md:h-[520px]"
+            role="img"
+            aria-label={`Convergencia de votos por candidato desde el 52% hasta el ${currentActas}% de actas`}
+          >
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={convergenceData}
+                margin={{ top: 10, right: 120, left: 0, bottom: 22 }}
+              >
+                <CartesianGrid
+                  vertical={false}
+                  stroke="var(--border-soft)"
+                  strokeOpacity={0.55}
+                />
+                <XAxis
+                  dataKey="actas"
+                  type="number"
+                  domain={[52, Math.min(100, currentActas + 1)]}
+                  ticks={convergenceXTicks}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+                  tickFormatter={(val) => String(val)}
+                  label={{
+                    value: '% actas contabilizadas',
+                    position: 'insideBottom',
+                    offset: -12,
+                    fill: 'var(--text-meta)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: 10,
+                    letterSpacing: '0.08em',
+                  }}
+                />
+                <YAxis
+                  domain={yDomain}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+                  tickFormatter={(val) => String(val)}
+                  width={32}
+                />
+                <Tooltip
+                  content={<ConvergenceTooltip />}
+                  cursor={{ stroke: 'var(--text-meta)', strokeDasharray: '3 3', strokeWidth: 1 }}
+                />
 
-                  {/* A1 · Banda de incertidumbre JEE: rango vertical que el JEE (±jee.totalPct/2 pp)
-                      puede mover al pelotón 2°-3°, dibujado al final de la gráfica */}
-                  {jee && top5[1] && top5[2] && (() => {
-                    const low = Math.min(top5[1].percent, top5[2].percent);
-                    const high = Math.max(top5[1].percent, top5[2].percent);
-                    const pad = jee.totalPct / 2;
-                    const y1 = Math.max(yDomain[0], low - pad);
-                    const y2 = Math.min(yDomain[1], high + pad);
-                    const span = Math.max(4, Math.round((currentActas - 52) * 0.18));
-                    return (
-                      <ReferenceArea
-                        y1={y1}
-                        y2={y2}
-                        x1={Math.max(52, currentActas - span)}
-                        x2={Math.min(100, currentActas + 1)}
-                        fill="var(--color-accent-soft)"
-                        fillOpacity={0.14}
-                        stroke="var(--color-accent-soft)"
-                        strokeOpacity={0.4}
-                        strokeDasharray="2 3"
-                        ifOverflow="visible"
-                      />
-                    );
-                  })()}
+                {/* Regla vertical del cruce 2°↔3°: anclaje del texto anotado al pie */}
+                {crossing2v3 && crossing2v3.kind === 'cross' && (
+                  <ReferenceLine
+                    x={crossing2v3.actas}
+                    stroke="var(--text-meta)"
+                    strokeDasharray="3 4"
+                    strokeOpacity={0.65}
+                    ifOverflow="visible"
+                    label={{
+                      value: `Cruce · ${crossing2v3.actas.toFixed(0)}% actas`,
+                      position: 'insideTopLeft',
+                      fill: 'var(--text-meta)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      offset: 6,
+                    }}
+                  />
+                )}
 
-                  {/* A2 · Marcador del cruce 2°↔3° (o punto de mínima distancia si nunca cruzaron) */}
-                  {crossing2v3 && top5[1] && top5[2] && (() => {
-                    const row = convergenceData.find((r) => r.actas === crossing2v3.actas);
-                    if (!row) return null;
-                    const yA = row[top5[1].party];
-                    const yB = row[top5[2].party];
-                    if (typeof yA !== 'number' || typeof yB !== 'number') return null;
-                    const yMid = (yA + yB) / 2;
+                {/* Líneas por candidato · grosor inverso al drama (2° y 3° protagonistas) */}
+                {visibleCandidates.map((c) => {
+                  const originalIdx = top5.findIndex((x) => x.id === c.id);
+                  const color = SERIES_COLORS[originalIdx % 5];
+                  const isPack = originalIdx === 1 || originalIdx === 2;
+                  const isLeader = originalIdx === 0;
+                  const strokeWidth = isPack ? 2.75 : isLeader ? 2 : 1.5;
+                  const strokeOpacity = isPack ? 1 : isLeader ? 0.85 : 0.65;
+                  return (
+                    <Line
+                      key={c.id}
+                      type="monotone"
+                      dataKey={c.party}
+                      stroke={color}
+                      strokeWidth={strokeWidth}
+                      strokeOpacity={strokeOpacity}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      dot={false}
+                      activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--bg-primary)' }}
+                      isAnimationActive={false}
+                      connectNulls
+                    />
+                  );
+                })}
+
+                {/* Dots terminales (color de serie, halo del bg) */}
+                {lastConvergence &&
+                  visibleCandidates.map((c) => {
+                    const originalIdx = top5.findIndex((x) => x.id === c.id);
+                    const y = lastConvergence[c.party];
+                    if (typeof y !== 'number') return null;
+                    const isPack = originalIdx === 1 || originalIdx === 2;
                     return (
                       <ReferenceDot
-                        x={crossing2v3.actas}
-                        y={yMid}
-                        r={7}
-                        fill="none"
-                        stroke="var(--text-primary)"
-                        strokeWidth={1.25}
-                        strokeDasharray="2 2"
+                        key={`end-${c.id}`}
+                        x={lastConvergence.actas}
+                        y={y}
+                        r={isPack ? 4.5 : originalIdx === 0 ? 4 : 3}
+                        fill={SERIES_COLORS[originalIdx % 5]}
+                        stroke="var(--bg-primary)"
+                        strokeWidth={1.5}
                         ifOverflow="visible"
-                      />
-                    );
-                  })()}
-
-                  {/* A3 · Grosor inverso al drama: 2° y 3° protagonistas, líder sellado en secundario */}
-                  {visibleCandidates.map((c) => {
-                    const originalIdx = top5.findIndex((x) => x.id === c.id);
-                    const color = SERIES_COLORS[originalIdx % 5];
-                    const isPack = originalIdx === 1 || originalIdx === 2;
-                    const isLeader = originalIdx === 0;
-                    const strokeWidth = isPack ? 2.75 : isLeader ? 2 : 1.25;
-                    const strokeOpacity = isPack ? 1 : isLeader ? 0.75 : 0.5;
-                    return (
-                      <Line
-                        key={c.id}
-                        type="monotone"
-                        dataKey={c.party}
-                        stroke={color}
-                        strokeWidth={strokeWidth}
-                        strokeOpacity={strokeOpacity}
-                        dot={false}
-                        activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--bg-primary)' }}
-                        isAnimationActive={false}
-                        connectNulls
                       />
                     );
                   })}
-                  {lastConvergence &&
-                    visibleCandidates.map((c) => {
-                      const originalIdx = top5.findIndex((x) => x.id === c.id);
-                      const y = lastConvergence[c.party];
-                      if (typeof y !== 'number') return null;
-                      const isPack = originalIdx === 1 || originalIdx === 2;
-                      return (
-                        <ReferenceDot
-                          key={`end-${c.id}`}
-                          x={lastConvergence.actas}
-                          y={y}
-                          r={isPack ? 4.5 : originalIdx === 0 ? 4 : 3}
-                          fill={SERIES_COLORS[originalIdx % 5]}
-                          stroke="var(--bg-primary)"
-                          strokeWidth={1.5}
-                          ifOverflow="visible"
-                        />
-                      );
-                    })}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
 
-            {/* Nota al pie de la gráfica: leyendas de anotaciones (A1/A2) */}
-            {(jee || crossing2v3) && (
-              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-5 gap-y-1 font-mono text-[0.7rem] themed-text-meta uppercase tracking-widest">
-                {jee && (
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="inline-block"
-                      style={{
-                        width: 14,
-                        height: 8,
-                        border: '1px dashed var(--color-accent-soft)',
-                        background: 'color-mix(in oklab, var(--color-accent-soft) 14%, transparent)',
-                      }}
-                    />
-                    <span className="normal-case tracking-normal">
-                      Franja: ±{(jee.totalPct / 2).toFixed(2)} pp que el JEE aún puede mover al pelotón
-                    </span>
-                  </span>
-                )}
-                {crossing2v3 && (
-                  <span className="flex items-center gap-2">
-                    <svg width="14" height="14" aria-hidden="true">
-                      <circle cx="7" cy="7" r="5" fill="none" stroke="var(--text-primary)" strokeWidth="1.25" strokeDasharray="2 2" />
-                    </svg>
-                    <span className="normal-case tracking-normal">
-                      {crossing2v3.kind === 'cross'
-                        ? `Último cruce 2°↔3° al ${crossing2v3.actas.toFixed(0)}% de actas`
-                        : `Menor distancia 2°–3° al ${crossing2v3.actas.toFixed(0)}% de actas`}
-                    </span>
-                  </span>
-                )}
-              </div>
-            )}
+                {/* Direct labeling: nombre + % al extremo derecho de cada línea,
+                    con anti-colisión simple en coordenadas de píxel */}
+                <Customized
+                  component={(props: unknown) => {
+                    const { yAxisMap, xAxisMap } = props as {
+                      yAxisMap: Record<string, { scale: (v: number) => number }>;
+                      xAxisMap: Record<string, { scale: (v: number) => number }>;
+                    };
+                    if (!lastConvergence || !yAxisMap || !xAxisMap) return null;
+                    const yScale = Object.values(yAxisMap)[0]?.scale;
+                    const xScale = Object.values(xAxisMap)[0]?.scale;
+                    if (!yScale || !xScale) return null;
 
-            {/* A6 · Leyenda móvil horizontal (desaparece en md+) */}
-            <div className="flex flex-wrap gap-x-4 gap-y-1.5 md:hidden pt-1 border-t themed-border-soft">
-              {top5.map((c, i) => {
-                const isPack = i === 1 || i === 2;
-                return (
-                  <div key={c.id} className="flex items-center gap-1.5 min-w-0">
-                    <span
-                      className="shrink-0 inline-block"
-                      style={{
-                        width: 12,
-                        height: isPack ? 3 : 2,
-                        background: SERIES_COLORS[i % 5],
-                        opacity: isPack ? 1 : i === 0 ? 0.75 : 0.5,
-                      }}
-                    />
-                    <span
-                      className={clsx(
-                        'font-mono text-xs truncate',
-                        isPack ? 'themed-text-primary' : 'themed-text-secondary',
-                      )}
-                    >
-                      {shortName(c.name)}{' '}
-                      <span className="tabular-nums themed-text-meta">
-                        {c.percent.toFixed(2)}%
-                      </span>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+                    const xPx = xScale(lastConvergence.actas);
+                    type LP = { c: Candidate; idx: number; color: string; y: number; value: number };
+                    const raw: LP[] = top5
+                      .map((c, idx) => {
+                        const v = lastConvergence[c.party];
+                        if (typeof v !== 'number') return null;
+                        return {
+                          c,
+                          idx,
+                          color: SERIES_COLORS[idx % 5],
+                          y: yScale(v),
+                          value: v,
+                        };
+                      })
+                      .filter((p): p is LP => p !== null)
+                      .sort((a, b) => a.y - b.y);
 
-            {/* A4 móvil · Pelotón del balotaje compacto (md:hidden) */}
-            {top5[1] && top5[2] && currentMargin2v3 !== null && (
-              <div className="md:hidden flex flex-col gap-3 pt-3 border-t themed-border">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs-eyebrow themed-text-meta">Pelea por el 2° lugar</span>
-                  <span className="font-serif text-base leading-tight text-[var(--text-primary)]">
-                    {shortName(top5[1].name)}{' '}
-                    <span className="font-mono text-xs themed-text-meta">vs.</span>{' '}
-                    {shortName(top5[2].name)}
-                  </span>
-                </div>
+                    // Anti-colisión vertical: empujar hacia abajo si la separación es < 18px
+                    const MIN_GAP = 18;
+                    for (let i = 1; i < raw.length; i++) {
+                      const prev = raw[i - 1];
+                      const cur = raw[i];
+                      if (cur.y - prev.y < MIN_GAP) cur.y = prev.y + MIN_GAP;
+                    }
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-xs-eyebrow themed-text-meta">Margen actual</span>
-                    <span className="font-serif font-light text-3xl leading-none tabular-nums text-[var(--text-primary)]">
-                      {Math.abs(currentMargin2v3).toFixed(3)}
-                      <span className="text-[0.4em] themed-text-meta"> pp</span>
-                    </span>
-                  </div>
-                  {jee && Math.abs(currentMargin2v3) > 0 && (
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-xs-eyebrow themed-text-meta">Zona gris (JEE)</span>
-                      <span className="font-serif font-light text-3xl leading-none tabular-nums text-[var(--text-primary)]">
-                        {(jee.totalPct / Math.max(Math.abs(currentMargin2v3), 0.001)).toFixed(0)}
-                        <span className="text-[0.4em] themed-text-meta">× el margen</span>
-                      </span>
-                      <span className="font-mono text-[0.7rem] themed-text-secondary">
-                        {jee.totalActas.toLocaleString('es-PE')} actas en revisión
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {marginHistory.length >= 2 && firstMargin2v3 !== null && (
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs-eyebrow themed-text-meta">Trayectoria del margen</span>
-                    <MarginSparkline history={marginHistory} />
-                    <span className="font-mono text-[0.7rem] themed-text-secondary">
-                      {Math.abs(firstMargin2v3).toFixed(2)} pp{' '}
-                      <span className="themed-text-meta">→</span>{' '}
-                      {Math.abs(currentMargin2v3).toFixed(3)} pp
-                      <span className="themed-text-meta"> · desde el {marginHistory[0].actas.toFixed(0)}% de actas</span>
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
+                    return (
+                      <g>
+                        {raw.map((p) => (
+                          <g key={p.c.id}>
+                            <line
+                              x1={xPx + 4}
+                              x2={xPx + 12}
+                              y1={yScale(p.value)}
+                              y2={p.y}
+                              stroke={p.color}
+                              strokeWidth={1}
+                              strokeOpacity={0.55}
+                            />
+                            <text
+                              x={xPx + 16}
+                              y={p.y}
+                              dominantBaseline="middle"
+                              fontFamily="var(--font-mono)"
+                              fontSize="11"
+                              fill="var(--text-primary)"
+                            >
+                              <tspan fontWeight={p.idx === 1 || p.idx === 2 ? 600 : 400}>
+                                {shortName(p.c.name)}
+                              </tspan>
+                              <tspan
+                                dx="6"
+                                fill="var(--text-meta)"
+                                style={{ fontVariantNumeric: 'tabular-nums' }}
+                              >
+                                {p.value.toFixed(2)}
+                              </tspan>
+                            </text>
+                          </g>
+                        ))}
+                      </g>
+                    );
+                  }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
 
-          {/* A4 · Pelotón del balotaje (reemplaza leyenda lateral en md+) */}
+          {/* Readout editorial debajo del gráfico */}
           {top5[1] && top5[2] && currentMargin2v3 !== null && (
-            <aside className="hidden md:flex md:w-64 md:shrink-0 md:flex-col md:gap-4 md:border-l themed-border md:pl-5">
-              <div className="flex flex-col gap-1 pb-3 border-b themed-border">
-                <span className="text-xs-eyebrow themed-text-meta">Pelea por el 2° lugar</span>
-                <span className="font-serif text-lg leading-tight text-[var(--text-primary)]">
-                  {shortName(top5[1].name)}{' '}
-                  <span className="font-mono text-sm themed-text-meta">vs.</span>{' '}
-                  {shortName(top5[2].name)}
-                </span>
-                <div className="flex items-center gap-4 mt-1">
-                  <span className="flex items-center gap-1.5">
-                    <span style={{ width: 10, height: 3, background: SERIES_COLORS[1] }} />
-                    <span className="font-mono text-xs tabular-nums themed-text-secondary">{top5[1].percent.toFixed(2)}%</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span style={{ width: 10, height: 3, background: SERIES_COLORS[2] }} />
-                    <span className="font-mono text-xs tabular-nums themed-text-secondary">{top5[2].percent.toFixed(2)}%</span>
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-1">
-                <span className="text-xs-eyebrow themed-text-meta">Margen actual</span>
-                <span className="font-serif font-light text-4xl leading-none tabular-nums text-[var(--text-primary)]">
-                  {Math.abs(currentMargin2v3).toFixed(3)}
-                  <span className="text-[0.4em] themed-text-meta"> pp</span>
-                </span>
-              </div>
-
-              {marginHistory.length >= 2 && firstMargin2v3 !== null && (
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-xs-eyebrow themed-text-meta">Trayectoria del margen</span>
-                  <MarginSparkline history={marginHistory} />
-                  <span className="font-mono text-[0.7rem] themed-text-secondary leading-snug">
-                    {Math.abs(firstMargin2v3).toFixed(2)} pp <span className="themed-text-meta">→</span>{' '}
-                    {Math.abs(currentMargin2v3).toFixed(3)} pp
-                    <span className="block themed-text-meta">desde el {marginHistory[0].actas.toFixed(0)}% de actas</span>
-                  </span>
-                </div>
+            <p className="text-body themed-text-secondary max-w-3xl border-t themed-border-soft pt-4">
+              Al cierre del {pctActas.toFixed(2)}% de actas,{' '}
+              <span className="text-[var(--text-primary)]">{shortName(top5[1].name)}</span>{' '}
+              supera a{' '}
+              <span className="text-[var(--text-primary)]">{shortName(top5[2].name)}</span>{' '}
+              por{' '}
+              <span className="text-[var(--text-primary)] tabular-nums">
+                {Math.abs(currentMargin2v3).toFixed(3)}
+              </span>{' '}
+              pp.
+              {crossing2v3 && crossing2v3.kind === 'cross' && (
+                <>
+                  {' '}El cruce ocurrió al{' '}
+                  <span className="text-[var(--text-primary)] tabular-nums">
+                    {crossing2v3.actas.toFixed(0)}%
+                  </span>{' '}
+                  de actas contabilizadas
+                  {currentActas > crossing2v3.actas && (
+                    <>, y la ventaja se mantuvo los últimos{' '}
+                      <span className="tabular-nums">{(currentActas - crossing2v3.actas).toFixed(0)}</span>{' '}
+                      pp del conteo
+                    </>
+                  )}
+                  .
+                </>
               )}
-
-              {jee && Math.abs(currentMargin2v3) > 0 && (
-                <div className="flex flex-col gap-1 pt-3 border-t themed-border">
-                  <span className="text-xs-eyebrow themed-text-meta">Zona gris (JEE)</span>
-                  <span className="font-mono text-sm text-[var(--text-primary)] tabular-nums">
-                    {jee.totalActas.toLocaleString('es-PE')} actas
-                  </span>
-                  <span className="font-mono text-[0.7rem] themed-text-secondary leading-snug">
-                    <span className="text-[var(--text-primary)] tabular-nums">
-                      {(jee.totalPct / Math.max(Math.abs(currentMargin2v3), 0.001)).toFixed(0)}×
-                    </span>{' '}
-                    el margen actual
-                  </span>
-                </div>
-              )}
-            </aside>
+              {' '}El primer puesto de{' '}
+              <span className="text-[var(--text-primary)]">{shortName(top5[0].name)}</span>{' '}
+              se consolidó sin disputa.
+            </p>
           )}
         </div>
       </section>
 
-      {/* 4. EL MARGEN QUE DECIDE EL BALOTAJE */}
+      {/* 4. EL MARGEN QUE DECIDE EL BALOTAJE · rediseñada con area fill split, sin Brush */}
       <section className="w-full max-w-7xl mx-auto px-4 py-16 md:py-24 flex flex-col gap-6">
         <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-2 border-b themed-border pb-3">
           <h2 className="text-h2 text-[var(--text-primary)]">El margen que decide el balotaje</h2>
-          <span className="text-xs-eyebrow themed-text-meta">Diferencia vs. % actas</span>
+          <span className="text-xs-eyebrow themed-text-meta">2° vs 3° a lo largo del cómputo</span>
         </div>
         <p className="text-body themed-text-secondary max-w-3xl">
-          Con el primer puesto sellado y ninguna candidatura cerca del 50 %, el suspenso queda en quién entra al balotaje. Esta es la historia del margen entre el actual 2° y 3° a lo largo del conteo: cuando la línea cruza el cero, el orden cambió.
+          Con el primer puesto sellado y ninguna candidatura cerca del 50 %, el suspenso queda en quién entra al balotaje. Esta es la historia del margen entre el 2° y el 3° del cierre a lo largo del conteo. El color del área indica quién iba adelante en cada tramo; cuando la línea cruza el cero, el orden cambió.
         </p>
 
         {top5[1] && top5[2] && marginHistory.length >= 2 && currentMargin2v3 !== null && (
-          <div className="themed-border border p-3 md:p-4 flex flex-col gap-3">
-            <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 pb-2 border-b themed-border-soft">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1">
               <span className="font-serif text-h3 text-[var(--text-primary)]">
                 {shortName(top5[1].name)}{' '}
                 <span className="font-mono text-sm themed-text-meta">vs.</span>{' '}
                 {shortName(top5[2].name)}
               </span>
-              <span className="font-mono text-xs themed-text-meta uppercase tracking-widest">
-                margen actual{' '}
-                <span className="text-[var(--text-primary)] tabular-nums">
+              <span className="text-xs-eyebrow themed-text-meta">
+                margen al cierre{' '}
+                <span className="text-[var(--text-primary)] tabular-nums normal-case">
                   {Math.abs(currentMargin2v3).toFixed(3)} pp
                 </span>
               </span>
             </div>
 
-            {/* Hint sutil: el default ya muestra el tramo final; el lector curioso arrastra el selector */}
-            <p className="font-mono text-xs themed-text-meta normal-case">
-              Vista del tramo final — arrastra el borde izquierdo del selector para ver desde el inicio.
-              {marginJeeOutOfView && (
-                <span className="block mt-1">
-                  · La banda JEE (±{((jee?.totalPct ?? 0) / 2).toFixed(2)} pp) queda fuera del viewport: el margen visible ya cabe dentro de la incertidumbre del Jurado.
-                </span>
-              )}
-            </p>
-
             <p className="sr-only">
               Gráfica del margen entre {shortName(top5[1]!.name)} y {shortName(top5[2]!.name)} a lo largo del conteo.
               {firstMargin2v3 !== null && currentMargin2v3 !== null && (
-                ` El margen empezó en ${Math.abs(firstMargin2v3).toFixed(2)} puntos porcentuales al corte del ${marginHistory[0]?.actas.toFixed(0)}% de actas y se ha cerrado a ${Math.abs(currentMargin2v3).toFixed(3)} puntos al corte actual del ${currentActas}%.`
+                ` El margen empezó en ${Math.abs(firstMargin2v3).toFixed(2)} puntos porcentuales al corte del ${marginHistory[0]?.actas.toFixed(0)}% de actas y se cerró a ${Math.abs(currentMargin2v3).toFixed(3)} puntos al ${currentActas}%.`
               )}
               {crossing2v3?.kind === 'cross' && ` Se cruzaron al ${crossing2v3.actas.toFixed(0)}% de actas.`}
-              {jee && ` La zona gris (actas en revisión del JEE) equivale a ${jee.totalPct.toFixed(2)}% de las actas totales, ${(jee.totalPct / Math.max(Math.abs(currentMargin2v3 ?? 0.001), 0.001)).toFixed(0)} veces más grande que el margen actual.`}
+              {jee && ` La zona gris en revisión del JEE equivale a ${jee.totalPct.toFixed(2)}% de las actas, ${(jee.totalPct / Math.max(Math.abs(currentMargin2v3 ?? 0.001), 0.001)).toFixed(0)} veces más grande que el margen actual.`}
             </p>
+
+            {/* Eyebrow editorial + unidad Y */}
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs-eyebrow themed-text-meta">pp a favor de cada uno</span>
+              <span className="text-xs-eyebrow themed-text-meta">
+                desde {marginHistory[0].actas.toFixed(0)}% actas
+              </span>
+            </div>
+
             <div
-              className="w-full h-[340px] md:h-[440px]"
+              className="w-full h-[380px] md:h-[500px]"
               role="img"
               aria-label={`Margen entre ${shortName(top5[1]!.name)} y ${shortName(top5[2]!.name)} desde el ${marginHistory[0]?.actas.toFixed(0)}% hasta el ${currentActas}% de actas`}
             >
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={marginHistory} margin={{ top: 18, right: 20, left: -5, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-soft)" />
+                <LineChart data={marginHistory} margin={{ top: 28, right: 32, left: 0, bottom: 28 }}>
+                  <defs>
+                    <linearGradient id="marginFillSplit" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset={0} stopColor={SERIES_COLORS[1]} stopOpacity={0.28} />
+                      <stop offset={Math.max(0, zeroOffset - 0.0001)} stopColor={SERIES_COLORS[1]} stopOpacity={0.05} />
+                      <stop offset={Math.min(1, zeroOffset + 0.0001)} stopColor={SERIES_COLORS[2]} stopOpacity={0.05} />
+                      <stop offset={1} stopColor={SERIES_COLORS[2]} stopOpacity={0.28} />
+                    </linearGradient>
+                  </defs>
+
+                  <CartesianGrid
+                    vertical={false}
+                    stroke="var(--border-soft)"
+                    strokeOpacity={0.55}
+                  />
+
                   <XAxis
                     dataKey="actas"
                     type="number"
@@ -970,15 +834,24 @@ export function Dashboard({ theme, data }: DashboardProps) {
                     axisLine={false}
                     tickLine={false}
                     tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
-                    tickFormatter={(val) => `${Number(val).toFixed(0)}%`}
+                    tickFormatter={(val) => String(Number(val).toFixed(0))}
+                    label={{
+                      value: '% actas contabilizadas',
+                      position: 'insideBottom',
+                      offset: -14,
+                      fill: 'var(--text-meta)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      letterSpacing: '0.08em',
+                    }}
                   />
                   <YAxis
                     domain={marginYDomain}
                     axisLine={false}
                     tickLine={false}
                     tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
-                    tickFormatter={(val) => `${val > 0 ? '+' : ''}${val.toFixed(1)}`}
-                    width={46}
+                    tickFormatter={(val) => Number(val).toFixed(1)}
+                    width={34}
                   />
                   <Tooltip
                     content={
@@ -990,45 +863,101 @@ export function Dashboard({ theme, data }: DashboardProps) {
                     cursor={{ stroke: 'var(--text-meta)', strokeDasharray: '3 3', strokeWidth: 1 }}
                   />
 
-                  {/* B · Banda JEE (±jee.totalPct/2) alrededor del cero = alcance de la zona gris */}
+                  {/* Banda JEE (±jee.totalPct/2) alrededor del cero · alcance de la zona gris */}
                   {jee && (
-                    <ReferenceArea
-                      y1={-jee.totalPct / 2}
-                      y2={jee.totalPct / 2}
-                      fill="var(--color-accent-soft)"
-                      fillOpacity={0.12}
-                      stroke="none"
+                    <ReferenceLine
+                      y={jee.totalPct / 2}
+                      stroke="var(--color-accent-soft)"
+                      strokeDasharray="2 4"
+                      strokeOpacity={0.75}
+                      ifOverflow="visible"
+                      label={{
+                        value: `+${(jee.totalPct / 2).toFixed(2)} pp · alcance JEE`,
+                        position: 'right',
+                        fill: 'var(--color-accent-soft)',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 9,
+                        offset: 4,
+                      }}
+                    />
+                  )}
+                  {jee && (
+                    <ReferenceLine
+                      y={-jee.totalPct / 2}
+                      stroke="var(--color-accent-soft)"
+                      strokeDasharray="2 4"
+                      strokeOpacity={0.75}
                       ifOverflow="visible"
                     />
                   )}
 
-                  {/* Línea del cero (empate) */}
+                  {/* Área split al cero: tinte del 2° arriba, del 3° abajo */}
+                  <Area
+                    type="monotone"
+                    dataKey="diff"
+                    stroke="none"
+                    fill="url(#marginFillSplit)"
+                    baseValue={0}
+                    isAnimationActive={false}
+                  />
+
+                  {/* Línea del cero (sin label · la geometría ya comunica empate) */}
                   <ReferenceLine
                     y={0}
                     stroke="var(--text-primary)"
                     strokeWidth={1.25}
-                    label={{
-                      value: 'EMPATE',
-                      position: 'insideTopRight',
-                      fill: 'var(--text-meta)',
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: 9,
-                      letterSpacing: '0.15em',
-                    }}
                   />
 
-                  {/* Serie del margen */}
+                  {/* Serie del margen · línea primaria */}
                   <Line
                     type="monotone"
                     dataKey="diff"
                     stroke="var(--text-primary)"
-                    strokeWidth={2.5}
+                    strokeWidth={2.25}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
                     dot={false}
                     activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--bg-primary)' }}
                     isAnimationActive={false}
                   />
 
-                  {/* Dot final enfatizado con anotación editorial: margen actual */}
+                  {/* Regla vertical del cruce · anclaje del texto al pie */}
+                  {crossing2v3 && crossing2v3.kind === 'cross' && (
+                    <ReferenceLine
+                      x={crossing2v3.actas}
+                      stroke="var(--text-meta)"
+                      strokeDasharray="3 4"
+                      strokeOpacity={0.7}
+                      ifOverflow="visible"
+                      label={{
+                        value: `Cruce · ${crossing2v3.actas.toFixed(0)}% actas`,
+                        position: 'insideTopLeft',
+                        fill: 'var(--text-meta)',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: 10,
+                        offset: 6,
+                      }}
+                    />
+                  )}
+
+                  {/* Regla vertical del cierre ONPE */}
+                  <ReferenceLine
+                    x={marginHistory[marginHistory.length - 1].actas}
+                    stroke="var(--text-primary)"
+                    strokeDasharray="3 4"
+                    strokeOpacity={0.55}
+                    ifOverflow="visible"
+                    label={{
+                      value: 'Cierre ONPE',
+                      position: 'insideTopRight',
+                      fill: 'var(--text-meta)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 10,
+                      offset: 6,
+                    }}
+                  />
+
+                  {/* Dot final enfatizado */}
                   <ReferenceDot
                     x={marginHistory[marginHistory.length - 1].actas}
                     y={marginHistory[marginHistory.length - 1].diff}
@@ -1038,7 +967,7 @@ export function Dashboard({ theme, data }: DashboardProps) {
                     strokeWidth={2}
                     ifOverflow="visible"
                     label={{
-                      value: `${Math.abs(currentMargin2v3).toFixed(3)} pp · hoy`,
+                      value: `${Math.abs(currentMargin2v3).toFixed(3)} pp`,
                       position: currentMargin2v3 > 0 ? 'top' : 'bottom',
                       fill: 'var(--text-primary)',
                       fontFamily: 'var(--font-mono)',
@@ -1046,101 +975,71 @@ export function Dashboard({ theme, data }: DashboardProps) {
                       offset: 10,
                     }}
                   />
-
-                  {/* Anotación del cruce: círculo + etiqueta del momento exacto */}
-                  {crossing2v3 && crossing2v3.kind === 'cross' && (
-                    <ReferenceDot
-                      x={crossing2v3.actas}
-                      y={0}
-                      r={6}
-                      fill="none"
-                      stroke="var(--text-primary)"
-                      strokeWidth={1.25}
-                      strokeDasharray="2 2"
-                      ifOverflow="visible"
-                      label={{
-                        value: `cruzaron al ${crossing2v3.actas.toFixed(0)}%`,
-                        position: 'top',
-                        fill: 'var(--text-meta)',
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: 10,
-                        offset: 12,
-                      }}
-                    />
-                  )}
-
-                  {/* Brush: zoom interactivo sobre el eje X */}
-                  <Brush
-                    dataKey="actas"
-                    height={26}
-                    travellerWidth={8}
-                    stroke="var(--border-primary)"
-                    fill="var(--bg-primary)"
-                    startIndex={marginBrush.start}
-                    endIndex={marginBrush.end}
-                    onChange={(r) => {
-                      if (typeof r.startIndex === 'number' && typeof r.endIndex === 'number') {
-                        setMarginBrush({ start: r.startIndex, end: r.endIndex });
-                        setBrushTouched(true);
-                      }
-                    }}
-                    tickFormatter={(val) => `${Number(val).toFixed(0)}%`}
-                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
 
-            {/* Nota al pie: cómo leer la gráfica */}
-            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-x-5 gap-y-1 font-mono text-[0.7rem] themed-text-meta uppercase tracking-widest pt-1 border-t themed-border-soft">
-              <span className="flex items-center gap-2">
-                <span className="inline-block" style={{ width: 10, height: 3, background: SERIES_COLORS[1] }} />
-                <span className="normal-case tracking-normal">
-                  Arriba del cero · {shortName(top5[1].name)} va adelante
-                </span>
-              </span>
-              <span className="flex items-center gap-2">
-                <span className="inline-block" style={{ width: 10, height: 3, background: SERIES_COLORS[2] }} />
-                <span className="normal-case tracking-normal">
-                  Abajo del cero · {shortName(top5[2].name)} va adelante
-                </span>
-              </span>
-              {jee && (
-                <span className="flex items-center gap-2">
-                  <span
-                    className="inline-block"
-                    style={{
-                      width: 14,
-                      height: 8,
-                      background: 'color-mix(in oklab, var(--color-accent-soft) 12%, transparent)',
-                    }}
-                  />
-                  <span className="normal-case tracking-normal">
-                    Banda ±{(jee.totalPct / 2).toFixed(2)} pp = alcance del JEE
+            {/* Readout editorial */}
+            <p className="text-body themed-text-secondary max-w-3xl border-t themed-border-soft pt-4">
+              {firstMargin2v3 !== null && (
+                <>
+                  El margen arrancó en{' '}
+                  <span className="text-[var(--text-primary)] tabular-nums">
+                    {Math.abs(firstMargin2v3).toFixed(2)}
+                  </span>{' '}
+                  pp a favor de{' '}
+                  <span className="text-[var(--text-primary)]">
+                    {firstMargin2v3 > 0 ? shortName(top5[1].name) : shortName(top5[2].name)}
                   </span>
-                </span>
-              )}
-              {crossing2v3 && crossing2v3.kind === 'cross' && (
-                <span className="flex items-center gap-2">
-                  <svg width="14" height="14" aria-hidden="true">
-                    <circle cx="7" cy="7" r="5" fill="none" stroke="var(--text-primary)" strokeWidth="1.25" strokeDasharray="2 2" />
-                  </svg>
-                  <span className="normal-case tracking-normal">
-                    Último cruce al {crossing2v3.actas.toFixed(0)}% de actas
+                  {crossing2v3 && crossing2v3.kind === 'cross' && (
+                    <>, se cerró al{' '}
+                      <span className="text-[var(--text-primary)] tabular-nums">
+                        {crossing2v3.actas.toFixed(0)}%
+                      </span>{' '}
+                      de actas
+                    </>
+                  )}
+                  {' '}y terminó en{' '}
+                  <span className="text-[var(--text-primary)] tabular-nums">
+                    {Math.abs(currentMargin2v3).toFixed(3)}
+                  </span>{' '}
+                  pp a favor de{' '}
+                  <span className="text-[var(--text-primary)]">
+                    {currentMargin2v3 > 0 ? shortName(top5[1].name) : shortName(top5[2].name)}
                   </span>
-                </span>
+                  .
+                </>
               )}
-            </div>
+              {jee && marginJeeOutOfView && (
+                <>
+                  {' '}El margen final cabe dentro de la banda JEE: las{' '}
+                  <span className="text-[var(--text-primary)] tabular-nums">
+                    {jee.totalActas.toLocaleString('es-PE')}
+                  </span>{' '}
+                  actas aún por resolver pueden moverlo de un lado al otro del cero.
+                </>
+              )}
+              {jee && !marginJeeOutOfView && (
+                <>
+                  {' '}Con{' '}
+                  <span className="text-[var(--text-primary)] tabular-nums">
+                    {jee.totalPct.toFixed(2)}%
+                  </span>
+                  {' '}de actas aún en el JEE, la cifra final podría moverse.
+                </>
+              )}
+            </p>
           </div>
         )}
 
-        {/* Grid: otros márgenes del top 5 (excluye el 2°-3° que ya está arriba) */}
+        {/* Pequeños múltiplos coherentes: otros pares consecutivos del top 5 */}
         {pairMargins.filter((pm) => pm.index !== 1).length > 0 && (
-          <>
-            <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1 pt-4">
+          <div className="flex flex-col gap-4 pt-6 border-t themed-border-soft">
+            <div className="flex flex-col md:flex-row md:items-baseline md:justify-between gap-1">
               <h3 className="text-h3 text-[var(--text-primary)]">Otros márgenes del top 5</h3>
-              <span className="text-xs-eyebrow themed-text-meta">Pares consecutivos del 1° al 5°</span>
+              <span className="text-xs-eyebrow themed-text-meta">Pares consecutivos · mismo vocabulario visual</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8">
               {pairMargins
                 .filter((pm) => pm.index !== 1)
                 .map((pm) => {
@@ -1149,36 +1048,79 @@ export function Dashboard({ theme, data }: DashboardProps) {
                     pm.current !== null && pm.first !== null
                       ? Math.abs(pm.current) - Math.abs(pm.first)
                       : null;
+
+                  const miniAbs = pm.history.length > 0
+                    ? Math.max(...pm.history.map((p) => Math.abs(p.diff)), 0.1)
+                    : 0.1;
+                  const miniDomain: [number, number] = [-miniAbs * 1.15, miniAbs * 1.15];
+                  const miniZeroOffset = miniAbs * 1.15 / (miniAbs * 1.15 * 2);
+
                   return (
-                    <div
-                      key={pm.index}
-                      className="themed-border border p-4 flex flex-col gap-3"
-                    >
+                    <div key={pm.index} className="flex flex-col gap-2">
                       <div className="flex flex-col gap-0.5 min-w-0">
                         <span className="text-xs-eyebrow themed-text-meta">{pm.label}</span>
-                        <span
-                          className="font-mono text-sm truncate"
-                          title={`${pm.a.name} vs. ${pm.b.name}`}
-                        >
+                        <span className="font-mono text-sm text-[var(--text-primary)] truncate" title={`${pm.a.name} vs. ${pm.b.name}`}>
                           <span className="inline-flex items-center gap-1.5 align-middle">
-                            <span style={{ width: 8, height: 2, background: pm.colorA, display: 'inline-block' }} />
+                            <span style={{ width: 10, height: 2, background: pm.colorA, display: 'inline-block' }} />
                             {shortName(pm.a.name)}
                           </span>
                           <span className="themed-text-meta"> vs. </span>
                           <span className="inline-flex items-center gap-1.5 align-middle">
-                            <span style={{ width: 8, height: 2, background: pm.colorB, display: 'inline-block' }} />
+                            <span style={{ width: 10, height: 2, background: pm.colorB, display: 'inline-block' }} />
                             {shortName(pm.b.name)}
                           </span>
                         </span>
                       </div>
 
                       {pm.history.length >= 2 && (
-                        <div className="w-full">
-                          <MarginSparkline history={pm.history} />
+                        <div className="w-full h-[120px]">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={pm.history} margin={{ top: 6, right: 4, left: 0, bottom: 4 }}>
+                              <defs>
+                                <linearGradient id={`mini-fill-${pm.index}`} x1="0" x2="0" y1="0" y2="1">
+                                  <stop offset={0} stopColor={pm.colorA} stopOpacity={0.28} />
+                                  <stop offset={Math.max(0, miniZeroOffset - 0.0001)} stopColor={pm.colorA} stopOpacity={0.05} />
+                                  <stop offset={Math.min(1, miniZeroOffset + 0.0001)} stopColor={pm.colorB} stopOpacity={0.05} />
+                                  <stop offset={1} stopColor={pm.colorB} stopOpacity={0.28} />
+                                </linearGradient>
+                              </defs>
+                              <XAxis dataKey="actas" type="number" domain={['dataMin', 'dataMax']} hide />
+                              <YAxis domain={miniDomain} hide />
+                              <ReferenceLine y={0} stroke="var(--text-primary)" strokeWidth={1} strokeOpacity={0.65} />
+                              <Area
+                                type="monotone"
+                                dataKey="diff"
+                                stroke="none"
+                                fill={`url(#mini-fill-${pm.index})`}
+                                baseValue={0}
+                                isAnimationActive={false}
+                              />
+                              <Line
+                                type="monotone"
+                                dataKey="diff"
+                                stroke="var(--text-primary)"
+                                strokeWidth={1.75}
+                                strokeLinecap="round"
+                                dot={false}
+                                isAnimationActive={false}
+                              />
+                              {pm.history.length > 0 && (
+                                <ReferenceDot
+                                  x={pm.history[pm.history.length - 1].actas}
+                                  y={pm.history[pm.history.length - 1].diff}
+                                  r={3}
+                                  fill="var(--text-primary)"
+                                  stroke="var(--bg-primary)"
+                                  strokeWidth={1.5}
+                                  ifOverflow="visible"
+                                />
+                              )}
+                            </LineChart>
+                          </ResponsiveContainer>
                         </div>
                       )}
 
-                      <div className="flex items-baseline justify-between mt-auto">
+                      <div className="flex items-baseline justify-between">
                         <span className="font-serif text-2xl tabular-nums text-[var(--text-primary)] leading-none">
                           {abs !== null ? abs.toFixed(abs < 1 ? 3 : 2) : '—'}
                           <span className="text-[0.5em] themed-text-meta"> pp</span>
@@ -1188,9 +1130,9 @@ export function Dashboard({ theme, data }: DashboardProps) {
                             className={clsx(
                               'font-mono text-[0.7rem] tabular-nums',
                               trend < -0.02
-                                ? 'text-[#D4A59A]'
+                                ? 'text-[#A3BE8C]'
                                 : trend > 0.02
-                                  ? 'text-[#A3BE8C]'
+                                  ? 'text-[#D4A59A]'
                                   : 'themed-text-secondary',
                             )}
                             title="Cambio en el valor absoluto del margen desde el primer corte al 52%+"
@@ -1204,35 +1146,54 @@ export function Dashboard({ theme, data }: DashboardProps) {
                   );
                 })}
             </div>
-          </>
-        )}
-
-        {/* Card del líder: cierra la narrativa recordando que el 1° está sellado en balotaje */}
-        {leader && (
-          <div className="themed-border border p-6 md:p-8 flex flex-col md:flex-row md:items-end md:justify-between gap-6 mt-4">
-            <div className="flex flex-col gap-2">
-              <span className="text-xs-eyebrow themed-text-meta">Primer puesto · ya en el balotaje</span>
-              <span className="font-serif text-2xl md:text-4xl text-[var(--text-primary)]">
-                {shortName(leader.name)}
-              </span>
-              <span className="text-xs-eyebrow themed-text-meta">{leader.party}</span>
-            </div>
-            <div className="flex flex-col md:items-end gap-1">
-              <span className="font-mono text-4xl md:text-5xl tabular-nums" style={{ color: SERIES_COLORS[0] }}>
-                {leader.percent.toFixed(2)}%
-              </span>
-              <span className="font-mono text-xs themed-text-secondary md:text-right max-w-xs">
-                {gapToMajority !== null && gapToMajority > 0
-                  ? `${gapToMajority.toFixed(2)} pp por debajo del 50 % + 1 → balotaje inevitable`
-                  : 'supera el 50 % + 1 — no requiere balotaje'}
-              </span>
-            </div>
           </div>
         )}
 
         <p className="text-body themed-text-secondary italic max-w-3xl">
-          Un balotaje no se resuelve sumando porcentajes: el flujo de voto de las candidaturas eliminadas requiere encuestas específicas. Lo que esta sección describe es qué tan reversible o sellado está el segundo puesto con el corte actual.
+          Un balotaje no se resuelve sumando porcentajes: el flujo de voto de las candidaturas eliminadas requiere encuestas específicas. Lo que esta sección describe es qué tan reversible o sellado quedó el segundo puesto al cierre del cómputo.
         </p>
+      </section>
+
+      {/* 5B. EPÍLOGO · cómo se cerró (cierra el capítulo ONPE antes de metodología) */}
+      <section className="w-full max-w-7xl mx-auto px-4 py-12 md:py-16">
+        <div className="themed-border border-t pt-8 flex flex-col gap-4">
+          <span className="text-xs-eyebrow themed-text-meta">Cómo se cerró</span>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-10">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs-eyebrow themed-text-meta">Primer corte</span>
+              <span className="font-serif text-2xl md:text-3xl tabular-nums text-[var(--text-primary)] leading-none">
+                {inicioConteoStr}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs-eyebrow themed-text-meta">Corte final</span>
+              <span className="font-serif text-2xl md:text-3xl tabular-nums text-[var(--text-primary)] leading-none">
+                {finConteoStr}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs-eyebrow themed-text-meta">Duración</span>
+              <span className="font-serif text-2xl md:text-3xl tabular-nums text-[var(--text-primary)] leading-none">
+                {diasEnteros} <span className="text-[0.55em] themed-text-meta">días</span>
+              </span>
+              <span className="font-mono text-[0.7rem] themed-text-meta tabular-nums">
+                {horasDeConteo} horas registradas
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs-eyebrow themed-text-meta">Cortes guardados</span>
+              <span className="font-serif text-2xl md:text-3xl tabular-nums text-[var(--text-primary)] leading-none">
+                {snapshotsCount}
+              </span>
+              <span className="font-mono text-[0.7rem] themed-text-meta tabular-nums">
+                {totalActasStr} actas en total
+              </span>
+            </div>
+          </div>
+          <p className="text-body themed-text-secondary max-w-3xl italic">
+            Aquí termina lo que ONPE puede publicar. Lo que falte de aquí a mayo se resuelve en el Jurado, acta por acta, y se incorporará al resultado oficial cuando el JNE proclame la elección.
+          </p>
+        </div>
       </section>
 
       {/* 6. METODOLOGÍA (siempre paper) */}
@@ -1241,7 +1202,7 @@ export function Dashboard({ theme, data }: DashboardProps) {
           <span className="text-xs-eyebrow text-[var(--color-ink-softer)]">METODOLOGÍA</span>
           <h3 className="text-h3 font-serif">De dónde salen estos números</h3>
           <p className="text-body font-serif text-[var(--color-ink-muted)]">
-            Los datos se extraen directamente de los endpoints públicos que alimentan el portal de resultados de la ONPE. Un proceso automático los captura cada 25 minutos y los guarda como historial. Los cortes anteriores al inicio del rastreo fueron reconstruidos desde capturas del portal y snapshots de Internet Archive.
+            Los datos se extraen directamente de los endpoints públicos que alimentan el portal de resultados de la ONPE. Durante el cómputo, un proceso automático los capturó cada 25 minutos y los guardó como historial; los cortes anteriores al inicio del rastreo fueron reconstruidos desde capturas del portal y snapshots de Internet Archive. El último corte incorporado es del {corteFinalStr}.
           </p>
           <p className="text-body font-serif text-[var(--color-ink-muted)]">
             Advertencia: el ritmo de escrutinio no es uniforme. Las primeras mesas contabilizadas suelen ser urbanas con mejor conectividad, no representativas del voto rural ni del voto en el extranjero que llega después. Los números antes del 10 % de actas son ruido, no señal.
